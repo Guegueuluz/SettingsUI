@@ -1205,7 +1205,7 @@ local Title =
 			Size =
 			UDim2.new(
 				1,
-				-90,
+				-130,
 				0,
 				30
 			),
@@ -1244,7 +1244,7 @@ local Subtitle =
 			Size =
 			UDim2.new(
 				1,
-				-90,
+				-130,
 				0,
 				22
 			),
@@ -1270,14 +1270,14 @@ local Subtitle =
 	)
 
 ----------------------------------------------------------------
--- CLOSE BUTTON
+-- WINDOW CONTROLS
 ----------------------------------------------------------------
 
-local CloseButton =
+local WindowControls =
 	Create(
-		"TextButton",
+		"Frame",
 		{
-			Name = "CloseButton",
+			Name = "WindowControls",
 
 			Parent = Header,
 
@@ -1294,6 +1294,46 @@ local CloseButton =
 				0,
 				0
 			),
+
+			Size =
+			UDim2.fromOffset(
+				0,
+				34
+			),
+
+			AutomaticSize = Enum.AutomaticSize.X,
+
+			BackgroundTransparency = 1,
+
+			ZIndex = 23,
+		}
+	)
+
+local WindowControlsLayout =
+	Create(
+		"UIListLayout",
+		{
+			Parent = WindowControls,
+
+			FillDirection = Enum.FillDirection.Horizontal,
+
+			SortOrder = Enum.SortOrder.LayoutOrder,
+
+			Padding = UDim.new(0, 8),
+		}
+	)
+
+----------------------------------------------------------------
+-- CLOSE BUTTON
+----------------------------------------------------------------
+
+local CloseButton =
+	Create(
+		"TextButton",
+		{
+			Name = "CloseButton",
+
+			Parent = WindowControls,
 
 			Size =
 			UDim2.fromOffset(
@@ -1321,6 +1361,8 @@ local CloseButton =
 			AutoButtonColor = false,
 
 			Selectable = true,
+
+			LayoutOrder = 3,
 
 			ZIndex = 23,
 		}
@@ -1357,21 +1399,7 @@ local FullscreenButton =
 		{
 			Name = "FullscreenButton",
 
-			Parent = Header,
-
-			AnchorPoint =
-			Vector2.new(
-				1,
-				0
-			),
-
-			Position =
-			UDim2.new(
-				1,
-				-42,
-				0,
-				0
-			),
+			Parent = WindowControls,
 
 			Size =
 			UDim2.fromOffset(
@@ -1389,6 +1417,8 @@ local FullscreenButton =
 			AutoButtonColor = false,
 
 			Selectable = true,
+
+			LayoutOrder = 1,
 
 			ZIndex = 23,
 		}
@@ -1414,6 +1444,53 @@ local FullscreenScale =
 			Scale = 1,
 		}
 	)
+
+----------------------------------------------------------------
+-- THEME BUTTON
+----------------------------------------------------------------
+
+local ThemeButton =
+	Create(
+		"TextButton",
+		{
+			Name = "ThemeButton",
+
+			Parent = WindowControls,
+
+			Size =
+			UDim2.fromOffset(
+				34,
+				34
+			),
+
+			BackgroundColor3 =
+			CONFIG.Colors.Dark,
+
+			BorderSizePixel = 0,
+
+			Text = "",
+
+			AutoButtonColor = false,
+
+			Selectable = true,
+
+			LayoutOrder = 2,
+
+			ZIndex = 23,
+		}
+	)
+
+Corner(
+	ThemeButton,
+	10
+)
+
+Stroke(
+	ThemeButton,
+	CONFIG.Colors.Border,
+	0.25,
+	1
+)
 
 ----------------------------------------------------------------
 -- FULLSCREEN ICON
