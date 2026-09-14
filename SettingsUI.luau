@@ -1,39 +1,5 @@
 	--[[
 		SettingsUI.client.lua
-		----------------------------------------------------------------
-		SETTINGS UI - Guegueuluz
-		Versão 0.3 Privada
-
-		COMPATIBILIDADE
-			• PC
-			• Smartphone
-			• Tablet
-			• Console / Gamepad
-			• TV / Ten-Foot Interface
-
-		RECURSOS
-			• Topbar
-			• Categorias
-			• Sidebar responsiva
-			• Animações modernas
-			• Smart Focus
-			• Fullscreen
-			• Ícone fullscreen desenhado por Frames
-			• Blur de fundo
-			• Responsive Layout
-			• Touch Support
-			• Gamepad Focus
-			• Aviso experimental de fotossensibilidade
-			• Modo reduzido
-			• Switch com pressão para confirmar
-			• Cancelamento seguro
-			• Anti-spam
-			• Cooldown de 2 segundos
-			• Fade-Off completo
-			• UIStroke incluído no Fade
-			• Canvas automático
-			• Animation Tokens
-		----------------------------------------------------------------
 	]]
 
 -- Mailo0370 ou Google Materials para ícones!
