@@ -23,7 +23,6 @@
 			• Responsive Layout
 			• Touch Support
 			• Gamepad Focus
-			• Página de versão
 			• Aviso experimental de fotossensibilidade
 			• Modo reduzido
 			• Switch com pressão para confirmar
@@ -159,23 +158,37 @@ local CONFIG = {
 		TV = UDim2.fromScale(0.88, 0.86),
 	},
 
-	Colors = {
+	Themes = {
+		Dark = {
+			Black = Color3.fromRGB(10, 10, 10),
+			Dark = Color3.fromRGB(16, 16, 16),
+			Darker = Color3.fromRGB(12, 12, 12),
+			White = Color3.fromRGB(255, 255, 255),
+			Secondary = Color3.fromRGB(150, 150, 150),
+			Description = Color3.fromRGB(170, 170, 170),
+			Border = Color3.fromRGB(55, 55, 55),
+			Focus = Color3.fromRGB(70, 70, 70),
+			Warning = Color3.fromRGB(255, 196, 76),
+			WarningDark = Color3.fromRGB(45, 36, 18),
+		},
 
-		Black = Color3.fromRGB(10, 10, 10),
-		Dark = Color3.fromRGB(16, 16, 16),
-		Darker = Color3.fromRGB(12, 12, 12),
-
-		White = Color3.fromRGB(255, 255, 255),
-
-		Secondary = Color3.fromRGB(150, 150, 150),
-		Description = Color3.fromRGB(170, 170, 170),
-
-		Border = Color3.fromRGB(55, 55, 55),
-		Focus = Color3.fromRGB(70, 70, 70),
-
-		Warning = Color3.fromRGB(255, 196, 76),
-		WarningDark = Color3.fromRGB(45, 36, 18),
+		Light = {
+			Black = Color3.fromRGB(246, 246, 248),
+			Dark = Color3.fromRGB(236, 236, 239),
+			Darker = Color3.fromRGB(226, 226, 230),
+			White = Color3.fromRGB(28, 28, 32),
+			Secondary = Color3.fromRGB(92, 92, 98),
+			Description = Color3.fromRGB(112, 112, 118),
+			Border = Color3.fromRGB(205, 205, 210),
+			Focus = Color3.fromRGB(218, 218, 223),
+			Warning = Color3.fromRGB(205, 145, 28),
+			WarningDark = Color3.fromRGB(255, 246, 220),
+		},
 	},
+
+	-- A paleta ativa continua em CONFIG.Colors para preservar a
+	-- compatibilidade com o restante do script.
+	Colors = nil,
 }
 
 ----------------------------------------------------------------
@@ -186,6 +199,10 @@ local Opened = false
 local CurrentCategory = "Geral"
 local CurrentPage = "Main"
 
+-- Estado de navegação preservado ao fechar/reabrir a interface.
+local SavedCategory = "Geral"
+local SavedPage = "Main"
+
 local FullscreenEnabled = false
 local Transitioning = false
 local TransitionStartedAt = 0
@@ -193,6 +210,7 @@ local TransitionStartedAt = 0
 local AnimationToken = 0
 local SettingsCooldownUntil = 0
 local TopbarClickLocked = false
+local ThemeRestarting = false
 
 local SettingRows = {}
 local CategoryButtons = {}
@@ -214,6 +232,19 @@ local ReducedMotionEnabled =
 	CONFIG.Accessibility.ReducedMotionDefault
 
 local FadeRegistry = {}
+
+local ThemeRegistry = {}
+local CurrentTheme = "Dark"
+
+local ThemeIcons = {
+	-- Substitua pelos IDs das suas imagens.
+	-- Dark = ícone exibido enquanto o tema atual é Dark (ex.: Lua/escuro).
+	-- Light = ícone exibido enquanto o tema atual é Light (ex.: Sol/claro).
+	Dark = "rbxassetid://73473029348351",
+	Light = "rbxassetid://79398225282535",
+}
+
+CONFIG.Colors = CONFIG.Themes[CurrentTheme]
 
 ----------------------------------------------------------------
 -- DEVICE STATE (declarado cedo de propósito)
@@ -445,6 +476,106 @@ end
 -- HELPERS
 ----------------------------------------------------------------
 
+local function ColorsEqual(a, b)
+	if typeof(a) ~= "Color3" or typeof(b) ~= "Color3" then
+		return false
+	end
+
+	return math.abs(a.R - b.R) < 0.0001
+		and math.abs(a.G - b.G) < 0.0001
+		and math.abs(a.B - b.B) < 0.0001
+end
+
+local function GetThemeRole(color)
+	if typeof(color) ~= "Color3" then
+		return nil
+	end
+
+	for _, palette in pairs(CONFIG.Themes) do
+		for role, paletteColor in pairs(palette) do
+			if ColorsEqual(color, paletteColor) then
+				return role
+			end
+		end
+	end
+
+	return nil
+end
+
+local function ThemeColor(role)
+	return CONFIG.Colors[role] or CONFIG.Themes.Dark[role]
+end
+
+local function RegisterThemeProperty(object, property, role)
+	if not object or not role then
+		return
+	end
+
+	table.insert(ThemeRegistry, {
+		Object = object,
+		Property = property,
+		Role = role,
+	})
+end
+
+local function RegisterThemeSequence(object, property, sequence)
+	if not object or not sequence then
+		return
+	end
+
+	local roles = {}
+	local hasRole = false
+
+	for index, keypoint in ipairs(sequence.Keypoints) do
+		local role = GetThemeRole(keypoint.Value)
+		roles[index] = role
+		if role then
+			hasRole = true
+		end
+	end
+
+	if not hasRole then
+		return
+	end
+
+	table.insert(ThemeRegistry, {
+		Object = object,
+		Property = property,
+		Sequence = sequence,
+		Roles = roles,
+	})
+end
+
+local function ApplyTheme(themeName)
+	if themeName ~= "Light" and themeName ~= "Dark" then
+		themeName = "Dark"
+	end
+
+	CurrentTheme = themeName
+	CONFIG.Colors = CONFIG.Themes[CurrentTheme]
+
+	for index = #ThemeRegistry, 1, -1 do
+		local entry = ThemeRegistry[index]
+		local object = entry.Object
+
+		if not object or object.Parent == nil then
+			table.remove(ThemeRegistry, index)
+		elseif entry.Sequence then
+			local keypoints = {}
+			for keyIndex, keypoint in ipairs(entry.Sequence.Keypoints) do
+				local role = entry.Roles[keyIndex]
+				keypoints[keyIndex] = ColorSequenceKeypoint.new(
+					keypoint.Time,
+					role and ThemeColor(role) or keypoint.Value
+				)
+			end
+			object[entry.Property] = ColorSequence.new(keypoints)
+		else
+			object[entry.Property] = ThemeColor(entry.Role)
+		end
+	end
+end
+
 local function Create(
 	className,
 	properties
@@ -455,8 +586,45 @@ local function Create(
 
 	for property, value in pairs(properties) do
 
-		object[property] = value
+		local themedValue = value
 
+		if typeof(value) == "Color3" then
+			local role = GetThemeRole(value)
+			if role then
+				themedValue = ThemeColor(role)
+				RegisterThemeProperty(object, property, role)
+			end
+		elseif typeof(value) == "ColorSequence" then
+			themedValue = value
+			local keypoints = {}
+			local hasRole = false
+
+			for index, keypoint in ipairs(value.Keypoints) do
+				local role = GetThemeRole(keypoint.Value)
+				if role then
+					hasRole = true
+					keypoints[index] = ColorSequenceKeypoint.new(
+						keypoint.Time,
+						ThemeColor(role)
+					)
+				else
+					keypoints[index] = keypoint
+				end
+			end
+
+			if hasRole then
+				themedValue = ColorSequence.new(keypoints)
+			end
+		end
+
+		object[property] = themedValue
+
+	end
+
+	for property, value in pairs(properties) do
+		if typeof(value) == "ColorSequence" then
+			RegisterThemeSequence(object, property, value)
+		end
 	end
 
 	if className == "TextLabel"
@@ -504,7 +672,11 @@ local function Stroke(
 	local stroke =
 		Instance.new("UIStroke")
 
-	stroke.Color = color
+	local role = GetThemeRole(color)
+	stroke.Color = role and ThemeColor(role) or color
+	if role then
+		RegisterThemeProperty(stroke, "Color", role)
+	end
 	stroke.Transparency = transparency or 0
 	stroke.Thickness = thickness or 1
 
@@ -1099,6 +1271,131 @@ local OverlayGradient =
 
 OverlayGradient.Enabled = true
 
+-- A cor base do OverlayFade também acompanha o tema e é interpolada
+-- junto com as cores do gradiente durante a troca de tema.
+local OverlayFadeColor =
+	Instance.new("Color3Value")
+OverlayFadeColor.Name = "OverlayFadeColor"
+OverlayFadeColor.Value = Color3.fromRGB(0, 0, 0)
+
+local function UpdateOverlayFadeColor()
+	OverlayFade.BackgroundColor3 = OverlayFadeColor.Value
+end
+
+OverlayFadeColor:GetPropertyChangedSignal("Value"):Connect(
+	UpdateOverlayFadeColor
+)
+
+-- As cores do gradiente acompanham o tema e podem ser interpoladas
+-- durante a troca para evitar uma mudança instantânea de cor.
+local OverlayGradientStart =
+	Instance.new("Color3Value")
+OverlayGradientStart.Name = "OverlayGradientStart"
+OverlayGradientStart.Value = Color3.fromRGB(0, 0, 0)
+
+local OverlayGradientEnd =
+	Instance.new("Color3Value")
+OverlayGradientEnd.Name = "OverlayGradientEnd"
+OverlayGradientEnd.Value = Color3.fromRGB(30, 30, 35)
+
+local function UpdateOverlayGradient()
+	OverlayGradient.Color =
+		ColorSequence.new({
+			ColorSequenceKeypoint.new(0, OverlayGradientStart.Value),
+			ColorSequenceKeypoint.new(1, OverlayGradientEnd.Value),
+		})
+end
+
+OverlayGradientStart:GetPropertyChangedSignal("Value"):Connect(
+	UpdateOverlayGradient
+)
+
+OverlayGradientEnd:GetPropertyChangedSignal("Value"):Connect(
+	UpdateOverlayGradient
+)
+
+local OverlayGradientThemes = {
+	Dark = {
+		Base = Color3.fromRGB(0, 0, 0),
+		Start = Color3.fromRGB(0, 0, 0),
+		End = Color3.fromRGB(30, 30, 35),
+	},
+
+	Light = {
+		Base = Color3.fromRGB(255, 255, 255),
+		Start = Color3.fromRGB(255, 255, 255),
+		End = Color3.fromRGB(235, 235, 240),
+	},
+}
+
+local function SetOverlayGradientTheme(themeName, duration)
+	local theme =
+		OverlayGradientThemes[themeName]
+
+	if not theme then
+		return
+	end
+
+	local transitionDuration =
+		MotionDuration(
+			duration or CONFIG.Animation.Medium
+		)
+
+	-- Sincroniza a cor sólida do OverlayFade com o mesmo timing
+	-- usado pelo gradiente.
+	Tween(
+		OverlayFadeColor,
+		{
+			Value = theme.Base,
+		},
+		transitionDuration,
+		Enum.EasingStyle.Quad,
+		Enum.EasingDirection.InOut
+	)
+
+	Tween(
+		OverlayGradientStart,
+		{
+			Value = theme.Start,
+		},
+		transitionDuration,
+		Enum.EasingStyle.Quad,
+		Enum.EasingDirection.InOut
+	)
+
+	Tween(
+		OverlayGradientEnd,
+		{
+			Value = theme.End,
+		},
+		transitionDuration,
+		Enum.EasingStyle.Quad,
+		Enum.EasingDirection.InOut
+	)
+end
+
+----------------------------------------------------------------
+-- THEME RESTART INPUT SHIELD
+----------------------------------------------------------------
+
+local ThemeTransitionShield =
+	Instance.new("TextButton")
+
+ThemeTransitionShield.Name = "ThemeTransitionShield"
+ThemeTransitionShield.Parent = ScreenGui
+ThemeTransitionShield.Size = UDim2.fromScale(1, 1)
+ThemeTransitionShield.Position = UDim2.fromScale(0, 0)
+ThemeTransitionShield.BackgroundColor3 = Color3.new(0, 0, 0)
+ThemeTransitionShield.BackgroundTransparency = 1
+ThemeTransitionShield.BorderSizePixel = 0
+ThemeTransitionShield.Text = ""
+ThemeTransitionShield.AutoButtonColor = false
+ThemeTransitionShield.Selectable = false
+ThemeTransitionShield.Active = true
+ThemeTransitionShield.Modal = true
+ThemeTransitionShield.Visible = false
+ThemeTransitionShield.ZIndex = 1000
+
 ----------------------------------------------------------------
 -- MAIN PANEL
 ----------------------------------------------------------------
@@ -1205,7 +1502,7 @@ local Title =
 			Size =
 			UDim2.new(
 				1,
-				-130,
+				-135,
 				0,
 				30
 			),
@@ -1244,7 +1541,7 @@ local Subtitle =
 			Size =
 			UDim2.new(
 				1,
-				-130,
+				-135,
 				0,
 				22
 			),
@@ -1278,33 +1575,12 @@ local WindowControls =
 		"Frame",
 		{
 			Name = "WindowControls",
-
 			Parent = Header,
-
-			AnchorPoint =
-			Vector2.new(
-				1,
-				0
-			),
-
-			Position =
-			UDim2.new(
-				1,
-				0,
-				0,
-				0
-			),
-
-			Size =
-			UDim2.fromOffset(
-				0,
-				34
-			),
-
-			AutomaticSize = Enum.AutomaticSize.X,
-
+			AnchorPoint = Vector2.new(1, 0),
+			Position = UDim2.new(1, 0, 0, 0),
+			Size = UDim2.fromOffset(118, 34),
 			BackgroundTransparency = 1,
-
+			BorderSizePixel = 0,
 			ZIndex = 23,
 		}
 	)
@@ -1314,12 +1590,11 @@ local WindowControlsLayout =
 		"UIListLayout",
 		{
 			Parent = WindowControls,
-
 			FillDirection = Enum.FillDirection.Horizontal,
-
-			SortOrder = Enum.SortOrder.LayoutOrder,
-
+			HorizontalAlignment = Enum.HorizontalAlignment.Right,
+			VerticalAlignment = Enum.VerticalAlignment.Center,
 			Padding = UDim.new(0, 8),
+			SortOrder = Enum.SortOrder.LayoutOrder,
 		}
 	)
 
@@ -1334,6 +1609,8 @@ local CloseButton =
 			Name = "CloseButton",
 
 			Parent = WindowControls,
+
+			LayoutOrder = 3,
 
 			Size =
 			UDim2.fromOffset(
@@ -1361,8 +1638,6 @@ local CloseButton =
 			AutoButtonColor = false,
 
 			Selectable = true,
-
-			LayoutOrder = 3,
 
 			ZIndex = 23,
 		}
@@ -1401,6 +1676,8 @@ local FullscreenButton =
 
 			Parent = WindowControls,
 
+			LayoutOrder = 1,
+
 			Size =
 			UDim2.fromOffset(
 				34,
@@ -1417,8 +1694,6 @@ local FullscreenButton =
 			AutoButtonColor = false,
 
 			Selectable = true,
-
-			LayoutOrder = 1,
 
 			ZIndex = 23,
 		}
@@ -1454,36 +1729,20 @@ local ThemeButton =
 		"TextButton",
 		{
 			Name = "ThemeButton",
-
 			Parent = WindowControls,
-
-			Size =
-			UDim2.fromOffset(
-				34,
-				34
-			),
-
-			BackgroundColor3 =
-			CONFIG.Colors.Dark,
-
-			BorderSizePixel = 0,
-
-			Text = "",
-
-			AutoButtonColor = false,
-
-			Selectable = true,
-
 			LayoutOrder = 2,
-
+			Size = UDim2.fromOffset(34, 34),
+			BackgroundColor3 = CONFIG.Colors.Dark,
+			BackgroundTransparency = 0,
+			BorderSizePixel = 0,
+			Text = "",
+			AutoButtonColor = false,
+			Selectable = true,
 			ZIndex = 23,
 		}
 	)
 
-Corner(
-	ThemeButton,
-	10
-)
+Corner(ThemeButton, 10)
 
 Stroke(
 	ThemeButton,
@@ -1491,6 +1750,32 @@ Stroke(
 	0.25,
 	1
 )
+
+local ThemeScale =
+	Create(
+		"UIScale",
+		{
+			Parent = ThemeButton,
+			Scale = 1,
+		}
+	)
+
+local ThemeIcon =
+	Create(
+		"ImageLabel",
+		{
+			Name = "Icon",
+			Parent = ThemeButton,
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.fromScale(0.5, 0.5),
+			Size = UDim2.fromOffset(22, 22),
+			BackgroundTransparency = 1,
+			Image = ThemeIcons[CurrentTheme],
+			ImageColor3 = CONFIG.Colors.White,
+			ScaleType = Enum.ScaleType.Fit,
+			ZIndex = 24,
+		}
+	)
 
 ----------------------------------------------------------------
 -- FULLSCREEN ICON
@@ -1672,6 +1957,22 @@ local function SetFullscreenIcon(enabled)
 	FullscreenIcon.Visible = not enabled
 	ExitIcon.Visible = enabled
 
+end
+
+local function SetTheme(themeName, persist)
+	if themeName ~= "Light" and themeName ~= "Dark" then
+		themeName = "Dark"
+	end
+
+	ApplyTheme(themeName)
+
+	if ThemeIcon then
+		ThemeIcon.Image = ThemeIcons[CurrentTheme]
+	end
+
+	if persist then
+		Player:SetAttribute("SettingsTheme", CurrentTheme)
+	end
 end
 
 ----------------------------------------------------------------
@@ -2062,62 +2363,7 @@ local PageLayout =
 		}
 	)
 
-----------------------------------------------------------------
--- VERSION BUTTON
--- Fica FORA do PageScroll.
-----------------------------------------------------------------
-
-local VersionButton =
-	Create(
-		"TextButton",
-		{
-			Name = "VersionButton",
-
-			Parent = PageArea,
-
-			AnchorPoint =
-			Vector2.new(
-				1,
-				1
-			),
-
-			Position =
-			UDim2.new(
-				1,
-				0,
-				1,
-				0
-			),
-
-			Size =
-			UDim2.fromOffset(
-				110,
-				24
-			),
-
-			BackgroundTransparency = 1,
-
-			Text = Icon("android"),
-
-			TextColor3 =
-			CONFIG.Colors.Secondary,
-
-			TextSize = 11,
-
-			Font =
-			Enum.Font.GothamMedium,
-
-			AutoButtonColor = false,
-
-			Selectable = true,
-
-			ZIndex = 24,
-		}
-	)
-
-RegisterFadeObject(
-	VersionButton
-)
+RegisterFadeTree(WindowControls)
 
 ----------------------------------------------------------------
 -- CATEGORIES
@@ -3987,6 +4233,12 @@ local function BuildAbout()
 		}
 	)
 
+	-- O cabeçalho "Sobre esta interface" também participa do sistema
+	-- de fade, garantindo que desapareça junto com os cards ao fechar.
+	RegisterFadeTree(
+		header
+	)
+
 	-- Cada card de "Sobre" agora tem seu próprio ícone (BuilderIcons)
 	-- e sua própria cor de destaque. Troque o nome do ícone por
 	-- qualquer outro disponível no pacote BuilderIcons do Studio,
@@ -4139,6 +4391,9 @@ function BuildCategory(
 
 	CurrentCategory =
 		categoryName
+
+	-- Mantém a última categoria visitada disponível para o próximo abrir.
+	SavedCategory = CurrentCategory
 
 	UpdateCategoryVisuals()
 
@@ -5169,282 +5424,6 @@ local TermsAspectConstraint =
 	)
 
 ----------------------------------------------------------------
--- VERSION PANEL
-----------------------------------------------------------------
-
-local VersionPanel =
-	Create(
-		"Frame",
-		{
-			Name = "VersionPanel",
-
-			Parent = ScreenGui,
-
-			AnchorPoint =
-			Vector2.new(
-				0.5,
-				0.5
-			),
-
-			Position =
-			UDim2.fromScale(
-				0.5,
-				0.5
-			),
-
-			Size =
-			UDim2.fromOffset(
-				520,
-				420
-			),
-
-			BackgroundColor3 =
-			CONFIG.Colors.Black,
-
-			BorderSizePixel = 0,
-
-			Visible = false,
-
-			ZIndex = 50,
-		}
-	)
-
-Corner(
-	VersionPanel,
-	16
-)
-
-Stroke(
-	VersionPanel,
-	CONFIG.Colors.Border,
-	0.15,
-	1
-)
-
-local VersionScale =
-	Create(
-		"UIScale",
-		{
-			Parent = VersionPanel,
-			Scale = 0.90,
-		}
-	)
-
-local VersionTitle =
-	Create(
-		"TextLabel",
-		{
-			Parent = VersionPanel,
-
-			Position =
-			UDim2.fromOffset(
-				24,
-				22
-			),
-
-			Size =
-			UDim2.new(
-				1,
-				-80,
-				0,
-				30
-			),
-
-			BackgroundTransparency = 1,
-
-			Text =
-			"Sobre esta interface",
-
-			TextColor3 =
-			CONFIG.Colors.White,
-
-			TextSize = 20,
-
-			Font =
-			Enum.Font.GothamBold,
-
-			TextXAlignment =
-			Enum.TextXAlignment.Left,
-
-			ZIndex = 52,
-		}
-	)
-
-local VersionSubtitle =
-	Create(
-		"TextLabel",
-		{
-			Parent = VersionPanel,
-
-			Position =
-			UDim2.fromOffset(
-				24,
-				52
-			),
-
-			Size =
-			UDim2.new(
-				1,
-				-48,
-				0,
-				25
-			),
-
-			BackgroundTransparency = 1,
-
-			Text =
-			"Informações da Settings UI",
-
-			TextColor3 =
-			CONFIG.Colors.Secondary,
-
-			TextSize = 12,
-
-			Font =
-			Enum.Font.Gotham,
-
-			TextXAlignment =
-			Enum.TextXAlignment.Left,
-
-			ZIndex = 52,
-		}
-	)
-
-local VersionClose =
-	Create(
-		"TextButton",
-		{
-			Parent = VersionPanel,
-
-			AnchorPoint =
-			Vector2.new(
-				1,
-				0
-			),
-
-			Position =
-			UDim2.new(
-				1,
-				-20,
-				0,
-				20
-			),
-
-			Size =
-			UDim2.fromOffset(
-				34,
-				34
-			),
-
-			BackgroundColor3 =
-			CONFIG.Colors.Dark,
-
-			BorderSizePixel = 0,
-
-			Text = "×",
-
-			TextColor3 =
-			CONFIG.Colors.White,
-
-			TextSize = 23,
-
-			Font =
-			Enum.Font.GothamMedium,
-
-			AutoButtonColor = false,
-
-			Selectable = true,
-
-			ZIndex = 53,
-		}
-	)
-
-Corner(
-	VersionClose,
-	10
-)
-
-Stroke(
-	VersionClose,
-	CONFIG.Colors.Border,
-	0.25,
-	1
-)
-
-local VersionInfo =
-	Create(
-		"TextLabel",
-		{
-			Parent = VersionPanel,
-
-			Position =
-			UDim2.fromOffset(
-				24,
-				105
-			),
-
-			Size =
-			UDim2.new(
-				1,
-				-48,
-				0,
-				220
-			),
-
-			BackgroundColor3 =
-			CONFIG.Colors.Dark,
-
-			BorderSizePixel = 0,
-
-			Text =
-			"Settings UI\n\n" ..
-
-			"Versão: 0.1 Privada\n" ..
-			"Engine: Roblox\n" ..
-			"Linguagem: Luau\n" ..
-			"Framework: Roblox Engine\n\n" ..
-
-			"Interface desenvolvida para testes " ..
-			"de usabilidade, acessibilidade, responsividade " ..
-			"e navegação multiplataforma.",
-
-			TextColor3 =
-			CONFIG.Colors.Description,
-
-			TextSize = 13,
-
-			Font =
-			Enum.Font.Gotham,
-
-			TextWrapped = true,
-
-			TextXAlignment =
-			Enum.TextXAlignment.Left,
-
-			TextYAlignment =
-			Enum.TextYAlignment.Top,
-
-			ZIndex = 52,
-		}
-	)
-
-Corner(
-	VersionInfo,
-	12
-)
-
-Stroke(
-	VersionInfo,
-	CONFIG.Colors.Border,
-	0.30,
-	1
-)
-
-RegisterFadeTree(
-	VersionPanel
-)
-
-----------------------------------------------------------------
 -- RESPONSIVE
 ----------------------------------------------------------------
 -- OBS: DetectDevice, IsPCDevice e CurrentDevice já foram
@@ -5623,69 +5602,6 @@ local function UpdateResponsiveLayout(
 			},
 			CONFIG.Animation.Medium
 		)
-
-	end
-
-	----------------------------------------------------------------
-	-- VERSION
-	----------------------------------------------------------------
-
-	if device == "Mobile" then
-
-		VersionPanel.Size =
-			UDim2.fromScale(
-				0.94,
-				0.82
-			)
-
-		TermsPanel.Size =
-			UDim2.fromScale(
-				0.96,
-				0.86
-			)
-		TermsText.TextSize = 11
-		TermsContentFrame.CanvasSize =
-			UDim2.new(
-				0,
-				0,
-				0,
-				math.max(
-					TermsText.TextBounds.Y + 40,
-					650
-				)
-			)
-
-	elseif device == "Tablet" then
-
-		VersionPanel.Size =
-			UDim2.fromScale(
-				0.80,
-				0.76
-			)
-
-	elseif device == "Console" then
-
-		VersionPanel.Size =
-			UDim2.fromOffset(
-				650,
-				500
-			)
-
-	elseif device == "TV" then
-
-		VersionPanel.Size =
-			UDim2.fromScale(
-				0.72,
-				0.76
-			)
-
-	else
-
-		VersionPanel.Size =
-			UDim2.fromOffset(
-				520,
-				420
-			)
 
 	end
 
@@ -6178,6 +6094,49 @@ local function SetFullscreen(
 		),
 		function()
 
+			if not IsValidToken(token) then
+				return
+			end
+
+			-- Os cards de "Sobre" usam o tamanho real de PageScroll.
+			-- Depois da animação de fullscreen, reconstruímos a página
+			-- para recalcular largura, altura e posição dos cards.
+			if CurrentCategory == "Sobre" then
+
+				local savedScrollY =
+					PageScroll.CanvasPosition.Y
+
+				BuildCategory(
+					"Sobre",
+					false,
+					true
+				)
+
+				task.defer(
+					function()
+
+						if not PageScroll.Parent then
+							return
+						end
+
+						local maxScrollY =
+							math.max(
+								0,
+								PageScroll.AbsoluteCanvasSize.Y
+								- PageScroll.AbsoluteWindowSize.Y
+							)
+
+						PageScroll.CanvasPosition =
+							Vector2.new(
+								0,
+								math.min(savedScrollY, maxScrollY)
+							)
+
+					end
+				)
+
+			end
+
 			EndTransition(
 				token,
 				false
@@ -6519,169 +6478,6 @@ local function ConfirmWarning(
 end
 
 ----------------------------------------------------------------
--- VERSION
-----------------------------------------------------------------
-
-local function OpenVersion()
-
-	if not Opened then
-		return
-	end
-
-	if Transitioning then
-		return
-	end
-
-	local token =
-		BeginTransition()
-
-	if not token then
-		return
-	end
-
-	CurrentPage =
-		"Version"
-
-	VersionPanel.Visible =
-		true
-
-	VersionScale.Scale =
-		ReducedMotionEnabled
-		and 1
-		or 0.90
-
-	FadePanel(
-		VersionPanel,
-		true,
-		0
-	)
-
-	Tween(
-		MainPanel,
-		{
-			Position =
-				UDim2.new(
-					0.5,
-					-35,
-					0.5,
-					0
-				),
-		},
-		CONFIG.Animation.Medium
-	)
-
-	Tween(
-		Overlay,
-		{
-			BackgroundTransparency =
-				0.45,
-		},
-		CONFIG.Animation.Medium
-	)
-
-	PlayScale(
-		VersionScale,
-		1,
-		CONFIG.Animation.Medium
-	)
-
-	FadePanel(
-		VersionPanel,
-		false,
-		CONFIG.Animation.Medium
-	)
-
-	task.delay(
-		MotionDuration(
-			CONFIG.Animation.Medium
-		),
-		function()
-
-			EndTransition(
-				token,
-				false
-			)
-
-		end
-	)
-
-end
-
-----------------------------------------------------------------
--- CLOSE VERSION
-----------------------------------------------------------------
-
-local function CloseVersion()
-
-	if not Opened then
-		return
-	end
-
-	if Transitioning then
-		return
-	end
-
-	local token =
-		BeginTransition()
-
-	if not token then
-		return
-	end
-
-	FadePanel(
-		VersionPanel,
-		true,
-		CONFIG.Animation.Fast
-	)
-
-	Tween(
-		MainPanel,
-		{
-			Position =
-				UDim2.fromScale(
-					0.5,
-					0.5
-				),
-		},
-		CONFIG.Animation.Medium
-	)
-
-	Tween(
-		Overlay,
-		{
-			BackgroundTransparency =
-				0,
-		},
-		CONFIG.Animation.Medium
-	)
-
-	task.delay(
-		MotionDuration(
-			CONFIG.Animation.Medium
-		),
-		function()
-
-			if not IsValidToken(token) then
-				return
-			end
-
-			VersionPanel.Visible =
-				false
-
-			CurrentPage =
-				"Main"
-
-			EndTransition(
-				token,
-				false
-			)
-
-		end
-	)
-
-end
-
-----------------------------------------------------------------
 -- CLOSE TERMS
 ----------------------------------------------------------------
 
@@ -6782,8 +6578,10 @@ local function OpenSettings()
 
 	Opened = true
 
+	-- Restaura a última posição de navegação.
+	-- Warning/Terms continuam sendo controlados pelo fluxo de acessibilidade.
 	CurrentCategory =
-		"Geral"
+		SavedCategory
 
 	CurrentPage =
 		"Main"
@@ -6819,9 +6617,6 @@ local function OpenSettings()
 	MainPanel.Visible =
 		not AccessibilityGateActive
 
-	VersionPanel.Visible =
-		false
-
 	WarningPanel.Visible =
 		false
 
@@ -6838,7 +6633,7 @@ local function OpenSettings()
 		false
 
 	BuildCategory(
-		"Geral",
+		CurrentCategory,
 		false,
 		true
 	)
@@ -6996,6 +6791,12 @@ local function CloseSettings()
 		"CloseSettings"
 	)
 
+	-- Guarda a posição antes de desmontar o estado visual.
+	SavedCategory = CurrentCategory
+	if CurrentPage ~= "Warning" and CurrentPage ~= "Terms" then
+		SavedPage = CurrentPage
+	end
+
 	Opened = false
 
 	CurrentPage =
@@ -7069,19 +6870,6 @@ local function CloseSettings()
 
 	end
 
-	----------------------------------------------------------------
-	-- VERSION
-	----------------------------------------------------------------
-
-	if VersionPanel.Visible then
-
-		FadePanel(
-			VersionPanel,
-			true,
-			CONFIG.Animation.Close
-		)
-
-	end
 
 	----------------------------------------------------------------
 	-- MAIN
@@ -7145,9 +6933,6 @@ local function CloseSettings()
 			MainPanel.Visible =
 				false
 
-			VersionPanel.Visible =
-				false
-
 			WarningPanel.Visible =
 				false
 
@@ -7188,6 +6973,55 @@ local function CloseSettings()
 end
 
 ----------------------------------------------------------------
+-- THEME RESTART
+----------------------------------------------------------------
+
+local function RestartSettingsForTheme(themeName)
+	if not Opened or Transitioning or ThemeRestarting then
+		return
+	end
+
+	ThemeRestarting = true
+
+	-- TESTE: sem fade-to-black. O Shield continua presente, porém
+	-- totalmente transparente, apenas para impedir intervenção do jogador.
+	ThemeTransitionShield.Visible = true
+	ThemeTransitionShield.BackgroundTransparency = 1
+
+	-- Preserva exatamente a categoria/aba antes da reinicialização.
+	SavedCategory = CurrentCategory
+	if CurrentPage ~= "Warning" and CurrentPage ~= "Terms" then
+		SavedPage = CurrentPage
+	end
+
+	-- O Overlay acompanha a troca de tema durante a própria transição:
+	-- Dark = preto, Light = branco.
+	SetOverlayGradientTheme(
+		themeName,
+		CONFIG.Animation.Close
+	)
+
+	SetTheme(themeName, true)
+	CloseSettings()
+
+	while Transitioning do
+		task.wait()
+	end
+
+	OpenSettings()
+
+	while Transitioning do
+		task.wait()
+	end
+
+	-- Fim do modo de teste: libera a interação somente depois que
+	-- o SettingsUI terminou de abrir novamente.
+	ThemeTransitionShield.BackgroundTransparency = 1
+	ThemeTransitionShield.Visible = false
+	ThemeRestarting = false
+end
+
+----------------------------------------------------------------
 -- INPUT
 ----------------------------------------------------------------
 
@@ -7197,6 +7031,10 @@ InputConnection =
 			input,
 			gameProcessed
 		)
+
+			if ThemeRestarting then
+				return
+			end
 
 			if gameProcessed then
 				return
@@ -7218,9 +7056,6 @@ InputConnection =
 
 					CloseSettings()
 
-				elseif CurrentPage == "Version" then
-
-					CloseVersion()
 
 				else
 
@@ -7248,9 +7083,7 @@ InputConnection =
 					return
 				end
 
-				if CurrentPage == "Warning"
-					or CurrentPage == "Version"
-				then
+				if CurrentPage == "Warning" then
 					return
 				end
 
@@ -7278,9 +7111,6 @@ InputConnection =
 
 					CloseSettings()
 
-				elseif CurrentPage == "Version" then
-
-					CloseVersion()
 
 				elseif CurrentPage == "Terms" then
 
@@ -7304,6 +7134,10 @@ InputConnection =
 ----------------------------------------------------------------
 
 local function ToggleSettingsFromTopbar()
+
+	if ThemeRestarting then
+		return
+	end
 
 	if TopbarClickLocked then
 		return
@@ -7417,9 +7251,6 @@ Overlay.Activated:Connect(
 
 			CloseSettings()
 
-		elseif CurrentPage == "Version" then
-
-			CloseVersion()
 
 		elseif CurrentPage == "Terms" then
 
@@ -7603,6 +7434,76 @@ TermsClose.Activated:Connect(
 
 
 ----------------------------------------------------------------
+-- THEME
+----------------------------------------------------------------
+
+ThemeButton.MouseEnter:Connect(function()
+	if not CanInteract() then
+		return
+	end
+
+	PlayScale(
+		ThemeScale,
+		CONFIG.Interaction.FocusScale,
+		CONFIG.Animation.Focus
+	)
+end)
+
+ThemeButton.MouseLeave:Connect(function()
+	PlayScale(
+		ThemeScale,
+		1,
+		CONFIG.Animation.Focus
+	)
+end)
+
+ThemeButton.MouseButton1Down:Connect(function()
+	if not CanInteract() or ReducedMotionEnabled then
+		return
+	end
+
+	PlayScale(
+		ThemeScale,
+		CONFIG.Interaction.PressScale,
+		CONFIG.Animation.Press
+	)
+end)
+
+ThemeButton.MouseButton1Up:Connect(function()
+	if not CanInteract() then
+		return
+	end
+
+	PlayScale(
+		ThemeScale,
+		1,
+		CONFIG.Animation.Focus
+	)
+end)
+
+ThemeButton.SelectionGained:Connect(function()
+	ApplySmartFocus(ThemeScale, true)
+end)
+
+ThemeButton.SelectionLost:Connect(function()
+	ApplySmartFocus(ThemeScale, false)
+end)
+
+ThemeButton.Activated:Connect(function()
+	if not Opened or not CanInteract() or ThemeRestarting then
+		return
+	end
+
+	PlaySettingsSound("CategoryButton")
+
+	local nextTheme = CurrentTheme == "Dark" and "Light" or "Dark"
+	task.spawn(
+		RestartSettingsForTheme,
+		nextTheme
+	)
+end)
+
+----------------------------------------------------------------
 -- FULLSCREEN
 ----------------------------------------------------------------
 
@@ -7616,26 +7517,6 @@ FullscreenButton.Activated:Connect(
 		SetFullscreen(
 			not FullscreenEnabled
 		)
-
-	end
-)
-
-----------------------------------------------------------------
--- VERSION
-----------------------------------------------------------------
-
-VersionButton.Activated:Connect(
-	function()
-
-		OpenVersion()
-
-	end
-)
-
-VersionClose.Activated:Connect(
-	function()
-
-		CloseVersion()
 
 	end
 )
@@ -7834,6 +7715,17 @@ UserInputService.LastInputTypeChanged:Connect(
 -- INITIALIZATION
 ----------------------------------------------------------------
 
+local SavedTheme = Player:GetAttribute("SettingsTheme")
+if SavedTheme == "Light" or SavedTheme == "Dark" then
+	CurrentTheme = SavedTheme
+end
+
+SetTheme(CurrentTheme, false)
+SetOverlayGradientTheme(
+	CurrentTheme,
+	0
+)
+
 UpdateResponsiveLayout(
 	true
 )
@@ -7845,8 +7737,6 @@ SetFullscreenIcon(
 MainPanel.Visible =
 	false
 
-VersionPanel.Visible =
-	false
 
 WarningPanel.Visible =
 	false
@@ -7868,9 +7758,6 @@ CaptureFadeTree(
 	MainPanel
 )
 
-CaptureFadeTree(
-	VersionPanel
-)
 
 CaptureFadeTree(
 	WarningPanel
