@@ -13,6 +13,10 @@ Falando em compatibilidade, **todos os dispositivos possuem suporte nativo**, ou
 
 * **Windows**
 
+<img src="https://pt.wikipedia.org/wiki/Ficheiro:Tux.svg" width="24" align="left">
+
+* **Linux - Qualquer Distro vale!**
+
 <img src="https://cdsassets.apple.com/live/2EELM3BG/macos/macos-27.png" width="24" align="left">
 
 * **MacOS**
