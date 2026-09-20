@@ -120,6 +120,16 @@ local CONFIG = {
 		PressScale = 0.97,
 	},
 
+	Audio = {
+
+		-- Deixe vazio para configurar a música diretamente no SoundService.
+		-- Exemplo: "rbxassetid://1234567890"
+		MusicId = "",
+
+		MusicEnabledDefault = true,
+		MusicVolumeDefault = 0.525,
+	},
+
 	Accessibility = {
 
 		-- Recurso experimental.
@@ -225,6 +235,54 @@ local PhotosensitivityWarningPending =
 	CONFIG.Accessibility.WarningEnabled
 
 local InterfaceSoundsEnabled = true
+
+local MusicEnabled =
+	CONFIG.Audio.MusicEnabledDefault == true
+
+local MusicVolume =
+	math.clamp(
+		CONFIG.Audio.MusicVolumeDefault or 0.35,
+		0,
+		1
+	)
+
+local BackgroundMusic = SoundService.SettingsUI:FindFirstChild("Music")
+
+if not BackgroundMusic then
+	BackgroundMusic =
+		Instance.new("Sound")
+
+	BackgroundMusic.Name = "Music"
+	BackgroundMusic.Parent = SoundService
+end
+
+BackgroundMusic.Looped = true
+BackgroundMusic.Volume = MusicVolume
+
+if CONFIG.Audio.MusicId ~= "" then
+	BackgroundMusic.SoundId = CONFIG.Audio.MusicId
+end
+
+local function ApplyMusicState()
+	BackgroundMusic.Volume = MusicVolume
+
+	if not MusicEnabled then
+		if BackgroundMusic.IsPlaying then
+			BackgroundMusic:Pause()
+		end
+		return
+	end
+
+	if BackgroundMusic.SoundId == ""
+		or BackgroundMusic.SoundId == "rbxassetid://0"
+	then
+		return
+	end
+
+	if not BackgroundMusic.IsPlaying then
+		BackgroundMusic:Play()
+	end
+end
 
 local AccessibilityGateActive = false
 
@@ -3699,6 +3757,244 @@ local function CreateInfoRow(
 
 end
 
+
+----------------------------------------------------------------
+-- MUSIC VOLUME SLIDER
+----------------------------------------------------------------
+
+local function CreateMusicVolumeSlider(
+	layoutOrder
+)
+
+	local rowHeight =
+		CurrentDevice == "Mobile" and 86 or 78
+
+	local row =
+		Create(
+			"TextButton",
+			{
+				Name = "MusicVolume",
+				Parent = PageScroll,
+				Size = UDim2.new(1, -6, 0, rowHeight),
+				BackgroundColor3 = CONFIG.Colors.Dark,
+				BorderSizePixel = 0,
+				Text = "",
+				AutoButtonColor = false,
+				Selectable = true,
+				LayoutOrder = layoutOrder or 1,
+				ZIndex = 24,
+			}
+		)
+
+	Corner(row, 12)
+	Stroke(row, CONFIG.Colors.Border, 0.30, 1)
+
+	local titleLabel =
+		Create(
+			"TextLabel",
+			{
+				Parent = row,
+				Position = UDim2.fromOffset(16, 8),
+				Size = UDim2.new(1, -100, 0, 22),
+				BackgroundTransparency = 1,
+				Text = "Volume da música",
+				TextColor3 = CONFIG.Colors.White,
+				TextSize = 15,
+				Font = Enum.Font.GothamMedium,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				ZIndex = 25,
+			}
+		)
+
+	local valueLabel =
+		Create(
+			"TextLabel",
+			{
+				Parent = row,
+				AnchorPoint = Vector2.new(1, 0),
+				Position = UDim2.new(1, -16, 0, 8),
+				Size = UDim2.fromOffset(60, 22),
+				BackgroundTransparency = 1,
+				TextColor3 = CONFIG.Colors.Secondary,
+				TextSize = 12,
+				Font = Enum.Font.GothamMedium,
+				TextXAlignment = Enum.TextXAlignment.Right,
+				ZIndex = 25,
+			}
+		)
+
+	local descriptionLabel =
+		Create(
+			"TextLabel",
+			{
+				Parent = row,
+				Position = UDim2.fromOffset(16, 29),
+				Size = UDim2.new(1, -32, 0, 18),
+				BackgroundTransparency = 1,
+				Text = "Ajuste o volume da música de fundo.",
+				TextColor3 = CONFIG.Colors.Description,
+				TextSize = 11,
+				Font = Enum.Font.Gotham,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				ZIndex = 25,
+			}
+		)
+
+	local bar =
+		Create(
+			"Frame",
+			{
+				Parent = row,
+				Position = UDim2.new(0, 16, 1, -18),
+				Size = UDim2.new(1, -32, 0, 5),
+				BackgroundColor3 = CONFIG.Colors.Black,
+				BorderSizePixel = 0,
+				ZIndex = 26,
+			}
+		)
+
+	Corner(bar, 3)
+
+	local fill =
+		Create(
+			"Frame",
+			{
+				Parent = bar,
+				Size = UDim2.new(MusicVolume, 0, 1, 0),
+				BackgroundColor3 = CONFIG.Colors.White,
+				BorderSizePixel = 0,
+				ZIndex = 27,
+			}
+		)
+
+	Corner(fill, 3)
+
+	local knob =
+		Create(
+			"Frame",
+			{
+				Parent = bar,
+				AnchorPoint = Vector2.new(0.5, 0.5),
+				Position = UDim2.new(MusicVolume, 0, 0.5, 0),
+				Size = UDim2.fromOffset(13, 13),
+				BackgroundColor3 = CONFIG.Colors.White,
+				BorderSizePixel = 0,
+				ZIndex = 28,
+			}
+		)
+
+	Corner(knob, 7)
+
+	local rowScale = Create("UIScale", {Parent = row, Scale = 1})
+
+	local function UpdateVisual(instant)
+		local percent = math.round(MusicVolume * 100)
+		valueLabel.Text = tostring(percent) .. "%"
+
+		local tweenTime = instant and 0 or CONFIG.Animation.Fast
+		Tween(fill, {Size = UDim2.new(MusicVolume, 0, 1, 0)}, tweenTime)
+		Tween(knob, {Position = UDim2.new(MusicVolume, 0, 0.5, 0)}, tweenTime)
+	end
+
+	local function SetVolumeFromX(x)
+		if bar.AbsoluteSize.X <= 0 then
+			return
+		end
+
+		MusicVolume = math.clamp(
+			(x - bar.AbsolutePosition.X) / bar.AbsoluteSize.X,
+			0,
+			1
+		)
+
+		UpdateVisual(false)
+		BackgroundMusic.Volume = MusicVolume
+		ApplyMusicState()
+	end
+
+	local dragging = false
+	local inputConnection
+
+	local function BeginSliderInput(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch
+		then
+			dragging = true
+			SetVolumeFromX(input.Position.X)
+		end
+	end
+
+	row.InputBegan:Connect(function(input)
+		BeginSliderInput(input)
+	end)
+
+	inputConnection = UserInputService.InputChanged:Connect(function(input)
+		if not dragging then
+			return
+		end
+
+		if input.UserInputType == Enum.UserInputType.MouseMovement
+			or input.UserInputType == Enum.UserInputType.Touch
+		then
+			SetVolumeFromX(input.Position.X)
+		end
+	end)
+
+	row.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch
+		then
+			dragging = false
+		end
+	end)
+
+	row.InputBegan:Connect(function(input)
+		if input.KeyCode == Enum.KeyCode.Left
+			or input.KeyCode == Enum.KeyCode.DPadLeft
+		then
+			MusicVolume = math.clamp(MusicVolume - 0.05, 0, 1)
+			UpdateVisual(false)
+			ApplyMusicState()
+		elseif input.KeyCode == Enum.KeyCode.Right
+			or input.KeyCode == Enum.KeyCode.DPadRight
+		then
+			MusicVolume = math.clamp(MusicVolume + 0.05, 0, 1)
+			UpdateVisual(false)
+			ApplyMusicState()
+		end
+	end)
+
+	row.AncestryChanged:Connect(function(_, parent)
+		if parent == nil and inputConnection then
+			inputConnection:Disconnect()
+			inputConnection = nil
+		end
+	end)
+
+	row.SelectionGained:Connect(function()
+		ApplySmartFocus(rowScale, true)
+	end)
+
+	row.SelectionLost:Connect(function()
+		ApplySmartFocus(rowScale, false)
+	end)
+
+	RegisterFadeTree(row)
+	UpdateVisual(true)
+
+	table.insert(
+		SettingRows,
+		{
+			Row = row,
+			Title = titleLabel,
+			Description = descriptionLabel,
+		}
+	)
+
+	return row
+
+end
+
 ----------------------------------------------------------------
 -- ABOUT CARD
 ----------------------------------------------------------------
@@ -4018,20 +4314,6 @@ local function BuildGeneral()
 		1
 	)
 
-	CreateToggle(
-		"Música",
-		"Controla a música principal da experiência.",
-		true,
-		2
-	)
-
-	CreateToggle(
-		"Efeitos sonoros",
-		"Controla sons de interação e ambiente.",
-		true,
-		3
-	)
-
 end
 
 
@@ -4122,25 +4404,38 @@ end
 
 local function BuildAudio()
 
-	CreateToggle(
+	-- Seção Música: permanece dentro de Áudio e não cria uma nova categoria.
+	CreateInfoRow(
 		"Música",
-		"Controla a música da experiência.",
-		true,
+		"Controle a música de fundo da experiência.",
 		1
 	)
 
 	CreateToggle(
-		"Efeitos sonoros",
-		"Controla efeitos sonoros gerais.",
-		true,
-		2
+		"Música de fundo",
+		"Ativa ou pausa a música principal da experiência.",
+		MusicEnabled,
+		2,
+
+		function(value)
+			MusicEnabled = value == true
+			ApplyMusicState()
+		end
+	)
+
+	CreateMusicVolumeSlider(3)
+
+	CreateInfoRow(
+		"Sons",
+		"Controle os sons produzidos pela experiência e pela interface.",
+		4
 	)
 
 	CreateToggle(
 		"Sons da interface",
 		"Controla sons produzidos pela interface.",
 		InterfaceSoundsEnabled,
-		3,
+		5,
 
 		function(value)
 
@@ -4149,6 +4444,8 @@ local function BuildAudio()
 
 		end
 	)
+
+	ApplyMusicState()
 
 end
 
@@ -8524,6 +8821,7 @@ if SavedTheme == "Light" or SavedTheme == "Dark" then
 end
 
 SetTheme(CurrentTheme, false)
+ApplyMusicState()
 SetOverlayGradientTheme(
 	CurrentTheme,
 	0
