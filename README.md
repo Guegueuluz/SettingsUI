@@ -13,7 +13,7 @@ Falando em compatibilidade, **todos os dispositivos possuem suporte nativo**, ou
 
 * **Windows**
 
-<img src="https://pt.wikipedia.org/wiki/Ficheiro:Tux.svg" width="24" align="left">
+<img src="https://thumb.wikimedia.org/wikipedia/commons/thumb/3/35/Tux.svg/500px-Tux.svg.png?utm_source=pt.wikipedia.org&utm_campaign=parser&utm_content=thumbnail" width="24" align="left">
 
 * **Linux - Qualquer Distro vale!**
 
