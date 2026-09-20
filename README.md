@@ -1,4 +1,4 @@
-# Sistema de Configurações com o Topbar
+  # Sistema de Configurações com o Topbar
 
 > **Configurações completas, fáceis de aprender e entender também**, por conta dos comentários dentro do `SettingsUI`.
 
@@ -115,3 +115,13 @@ Mas também obtive **bugs, problemas e até erros críticos** nesse projeto que 
 Às vezes, eu ficava me batendo por algumas horas, até por **UM DIA a mais!**
 
 ---
+<br>
+
+<p align="center">
+  <a href="https://www.roblox.com/pt/users/367737326/profile">
+    <img src="./assets/GGLZ.png" width="320" alt="GGLZ">
+  </a>
+  <br><br>
+  <sub>© 2026 Guegueuluz. Todos os direitos reservados.</sub>
+</p>
+
