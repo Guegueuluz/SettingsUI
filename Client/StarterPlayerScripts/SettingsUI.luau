@@ -127,7 +127,7 @@ local CONFIG = {
 		MusicId = "",
 
 		MusicEnabledDefault = true,
-		MusicVolumeDefault = 0.35,
+		MusicVolumeDefault = 0.525,
 	},
 
 	Accessibility = {
@@ -246,14 +246,13 @@ local MusicVolume =
 		1
 	)
 
-local BackgroundMusic =
-	SoundService:FindFirstChild("SettingsBackgroundMusic")
+local BackgroundMusic = SoundService.SettingsUI:FindFirstChild("Music")
 
 if not BackgroundMusic then
 	BackgroundMusic =
 		Instance.new("Sound")
 
-	BackgroundMusic.Name = "SettingsBackgroundMusic"
+	BackgroundMusic.Name = "Music"
 	BackgroundMusic.Parent = SoundService
 end
 
