@@ -63,7 +63,7 @@ Além dos dispositivos, o sistema considera diferentes métodos de interação:
 * ⌨️ **Teclado**
 * 🖱️ **Mouse**
 * 👆 **Touch / Tela sensível ao toque**
-* 🎮 **Controle / Gamepad**
+* 🎮 **Controle / Gamepad** obs : não totalmente (ainda trabalhando nisso completamente)
 * 🥽 **VR / Realidade Virtual**
 
 > **Observação:** a disponibilidade de determinados recursos pode variar de acordo com a plataforma, dispositivo e recursos atualmente oferecidos pelo Roblox.
