@@ -1098,7 +1098,7 @@ if not ScreenGui then
 		true
 
 	ScreenGui.ScreenInsets =
-		Enum.ScreenInsets.CoreUISafeInsets
+		Enum.ScreenInsets.None
 
 	ScreenGui.ZIndexBehavior =
 		Enum.ZIndexBehavior.Sibling
