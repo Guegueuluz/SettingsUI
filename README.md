@@ -126,6 +126,7 @@ Mas também obtive **bugs, problemas e até erros críticos** nesse projeto que 
     <img src="./assets/GGLZ.png" width="320" alt="GGLZ">
   </a>
   <br><br>
+  <sub>Feito com 💓 por</sub>
   <sub>© 2026 Guegueuluz. Todos os direitos reservados.</sub>
 </p>
 
