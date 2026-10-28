@@ -2461,6 +2461,10 @@ local function ApplyLoadedSettings(settings)
 	if typeof(settings.PhotosensitivityProtectionEnabled) == "boolean" then
 		PhotosensitivityProtectionEnabled = settings.PhotosensitivityProtectionEnabled
 	end
+	end
+	if typeof(settings.PhotosensitivityProtectionEnabled) == "boolean" then
+		PhotosensitivityProtectionEnabled = settings.PhotosensitivityProtectionEnabled
+	end
 	if typeof(settings.VibrationEnabled) == "boolean" then
 		VibrationEnabled = settings.VibrationEnabled
 	end
@@ -3095,12 +3099,12 @@ end
 
 
 local function CreateCategoryButton(
-	category,
-	index
+category,
+index
 )
 
-	local categoryButtonHeight =
-		44
+local categoryButtonHeight =
+	44
 
 	local button =
 		Create(
