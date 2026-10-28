@@ -47,6 +47,7 @@ local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local GuiService = game:GetService("GuiService")
 local Lighting = game:GetService("Lighting")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
@@ -62,6 +63,23 @@ if not SettingsSounds then
 
 	SettingsSounds.Name = "SettingsUI"
 	SettingsSounds.Parent = SoundService
+end
+
+local SaveButtonSound = SettingsSounds:FindFirstChild("SaveButton")
+if not SaveButtonSound then
+	SaveButtonSound = Instance.new("Sound")
+	SaveButtonSound.Name = "SaveButton"
+	SaveButtonSound.Volume = 0.7
+	SaveButtonSound.Parent = SettingsSounds
+end
+
+local SecretSettingsMusic = SettingsSounds:FindFirstChild("SecretSettingsMusic")
+if not SecretSettingsMusic then
+	SecretSettingsMusic = Instance.new("Sound")
+	SecretSettingsMusic.Name = "SecretSettingsMusic"
+	SecretSettingsMusic.Looped = true
+	SecretSettingsMusic.Volume = 0
+	SecretSettingsMusic.Parent = SettingsSounds
 end
 
 local BUILDER_ICONS =
@@ -224,12 +242,27 @@ local ThemeRestarting = false
 
 local SettingRows = {}
 local CategoryButtons = {}
+local SaveButton = nil
+local UpdateSaveButtonVisual = function() end
+local SettingsPersistenceRemote = nil
+local SettingsInitialized = false
+local SettingsDirty = false
+local SaveCooldownActive = false
+local SaveInProgress = false
+local SettingsRevision = 0
+local SecretSettingsTriggered = false
+local SecretSettingsTimer = nil
+local SecretSettingsEnvironment = nil
+local SecretSettingsMusicFadeToken = 0
 
 local ViewportConnection = nil
 local InputConnection = nil
 
 local PhotosensitivityConfirmed = false
 local PhotosensitivityProtectionEnabled = true
+local NotificationsEnabled = true
+local VibrationEnabled = true
+local InterfaceAnimationsEnabled = true
 
 local PhotosensitivityWarningPending =
 	CONFIG.Accessibility.WarningEnabled
@@ -266,6 +299,13 @@ end
 local function ApplyMusicState()
 	BackgroundMusic.Volume = MusicVolume
 
+	if SecretSettingsTriggered and MusicEnabled then
+		SecretSettingsTriggered = false
+		CancelSecretSettingsTimer()
+		RestoreSecretSettingsEnvironment()
+		StopSecretSettingsMusic(2)
+	end
+
 	if not MusicEnabled then
 		if BackgroundMusic.IsPlaying then
 			BackgroundMusic:Pause()
@@ -282,6 +322,142 @@ local function ApplyMusicState()
 	if not BackgroundMusic.IsPlaying then
 		BackgroundMusic:Play()
 	end
+end
+
+local function MarkSettingsDirty()
+	SettingsRevision += 1
+	SettingsDirty = true
+	UpdateSaveButtonVisual()
+end
+
+local function CancelSecretSettingsTimer()
+	if SecretSettingsTimer then
+		task.cancel(SecretSettingsTimer)
+		SecretSettingsTimer = nil
+	end
+end
+
+local function RestoreSecretSettingsEnvironment()
+	if not SecretSettingsEnvironment then
+		return
+	end
+
+	local brightness = SecretSettingsEnvironment.Brightness
+	local ambient = SecretSettingsEnvironment.OutdoorAmbient
+	local ambientDark = SecretSettingsEnvironment.Ambient
+	local clock = SecretSettingsEnvironment.ClockTime
+
+	Tween(Lighting, {
+		Brightness = brightness,
+		OutdoorAmbient = ambient,
+		Ambient = ambientDark,
+		ClockTime = clock,
+	}, 0.7)
+
+	if SettingsBlur then
+		Tween(SettingsBlur, { Size = 0 }, 0.7)
+		task.delay(0.7, function()
+			SettingsBlur.Enabled = false
+			SettingsBlur.Size = 0
+		end)
+	end
+
+	SecretSettingsEnvironment = nil
+end
+
+local function StartSecretSettingsTimer()
+	CancelSecretSettingsTimer()
+
+	SecretSettingsTimer = task.delay(60, function()
+		if not Opened or MusicEnabled or SecretSettingsTriggered then
+			return
+		end
+
+		if type(TriggerSecretSettings) == "function" then
+			TriggerSecretSettings()
+		end
+	end)
+end
+
+local function TriggerSecretSettings()
+	if SecretSettingsTriggered or MusicEnabled then
+		return
+	end
+
+	SecretSettingsTriggered = true
+	SecretSettingsMusicFadeToken += 1
+	local fadeToken = SecretSettingsMusicFadeToken
+
+	if not SecretSettingsEnvironment then
+		SecretSettingsEnvironment = {
+			Brightness = Lighting.Brightness,
+			OutdoorAmbient = Lighting.OutdoorAmbient,
+			Ambient = Lighting.Ambient,
+			ClockTime = Lighting.ClockTime,
+		}
+	end
+
+	if SettingsBlur then
+		SettingsBlur.Enabled = true
+		Tween(SettingsBlur, { Size = 18 }, 0.9)
+	end
+
+	if SecretSettingsMusic and SecretSettingsMusic.Parent then
+		SecretSettingsMusic.Volume = 0
+		SecretSettingsMusic:Play()
+	end
+
+	Tween(Lighting, {
+		Brightness = math.max(Lighting.Brightness * 0.7, 1),
+		OutdoorAmbient = Color3.fromRGB(26, 27, 34),
+		Ambient = Color3.fromRGB(30, 32, 39),
+	}, 0.9)
+
+	task.spawn(function()
+		if not SecretSettingsMusic or not SecretSettingsMusic.Parent then
+			return
+		end
+
+		local targetVolume = 0.22
+		for step = 1, 28 do
+			if SecretSettingsMusicFadeToken ~= fadeToken then
+				return
+			end
+			SecretSettingsMusic.Volume = targetVolume * (step / 28)
+			task.wait(0.12)
+		end
+		SecretSettingsMusic.Volume = targetVolume
+	end)
+end
+
+local function StopSecretSettingsMusic(fadeOutSeconds)
+	if not SecretSettingsMusic or not SecretSettingsMusic.Parent then
+		return
+	end
+
+	SecretSettingsMusicFadeToken += 1
+	local fadeToken = SecretSettingsMusicFadeToken
+	local startVolume = SecretSettingsMusic.Volume
+
+	if fadeOutSeconds and fadeOutSeconds > 0 then
+		task.spawn(function()
+			for step = 1, 20 do
+				if SecretSettingsMusicFadeToken ~= fadeToken then
+					return
+				end
+				SecretSettingsMusic.Volume = startVolume * (1 - (step / 20))
+				task.wait(0.1)
+			end
+			if SecretSettingsMusicFadeToken == fadeToken then
+				SecretSettingsMusic.Volume = 0
+				SecretSettingsMusic:Stop()
+			end
+		end)
+		return
+	end
+
+	SecretSettingsMusic.Volume = 0
+	SecretSettingsMusic:Stop()
 end
 
 local AccessibilityGateActive = false
@@ -355,22 +531,21 @@ function DetectDevice()
 
 	end
 
-	if width < 600 then
+	local aspectRatio = width / math.max(height, 1)
 
+	-- Celulares podem aparecer em preview em landscape e ainda
+	-- devem ser tratados como Mobile, mantendo a mesma estrutura
+	-- visual do PC, mas com escala reduzida.
+	if width <= 900 or (width <= 980 and (height <= 760 or aspectRatio <= 1.6)) then
 		return "Mobile"
-
 	end
 
-	if width < 1000 then
-
+	if width < 1100 then
 		return "Tablet"
-
 	end
 
 	if width >= 1600 then
-
 		return "PC_Large"
-
 	end
 
 	return "PC"
@@ -1033,19 +1208,8 @@ local function FadeOverlayFade(
 		return
 	end
 
-	local targetTransparency =
-		visible
-		and 0
-		or 1
-
-	Tween(
-		OverlayFade,
-		{
-			BackgroundTransparency =
-				targetTransparency,
-		},
-		duration or CONFIG.Animation.Medium
-	)
+	OverlayFade.Visible = true
+	OverlayFade.BackgroundTransparency = visible and 0 or 1
 
 end
 
@@ -1302,7 +1466,7 @@ local OverlayFade =
 			Position = UDim2.fromScale(0,0),
 			Size = UDim2.fromScale(1,1),
 			BackgroundColor3 = Color3.fromRGB(0, 0, 0),
-			BackgroundTransparency = 0,
+			BackgroundTransparency = 1,
 			BorderSizePixel = 0,
 			ZIndex = 11,
 		}
@@ -1560,7 +1724,7 @@ local Title =
 			Size =
 			UDim2.new(
 				1,
-				-135,
+				-180,
 				0,
 				30
 			),
@@ -1599,7 +1763,7 @@ local Subtitle =
 			Size =
 			UDim2.new(
 				1,
-				-135,
+				-180,
 				0,
 				22
 			),
@@ -1624,6 +1788,32 @@ local Subtitle =
 		}
 	)
 
+local function UpdateHeaderAlignment()
+	local isMobile = CurrentDevice == "Mobile"
+
+	if isMobile then
+		Title.Size = UDim2.new(1, 0, 0, 30)
+		Title.Position = UDim2.fromOffset(0, 0)
+		Title.TextXAlignment = Enum.TextXAlignment.Center
+		Title.TextSize = 23
+
+		Subtitle.Size = UDim2.new(1, 0, 0, 22)
+		Subtitle.Position = UDim2.fromOffset(0, 31)
+		Subtitle.TextXAlignment = Enum.TextXAlignment.Center
+		Subtitle.TextSize = 13
+	else
+		Title.Size = UDim2.new(1, -180, 0, 30)
+		Title.Position = UDim2.fromOffset(0, 0)
+		Title.TextXAlignment = Enum.TextXAlignment.Left
+		Title.TextSize = 25
+
+		Subtitle.Size = UDim2.new(1, -180, 0, 22)
+		Subtitle.Position = UDim2.fromOffset(0, 31)
+		Subtitle.TextXAlignment = Enum.TextXAlignment.Left
+		Subtitle.TextSize = 14
+	end
+end
+
 ----------------------------------------------------------------
 -- WINDOW CONTROLS
 ----------------------------------------------------------------
@@ -1636,7 +1826,7 @@ local WindowControls =
 			Parent = Header,
 			AnchorPoint = Vector2.new(1, 0),
 			Position = UDim2.new(1, 0, 0, 0),
-			Size = UDim2.fromOffset(118, 34),
+			Size = UDim2.fromOffset(160, 34),
 			BackgroundTransparency = 1,
 			BorderSizePixel = 0,
 			ZIndex = 23,
@@ -1657,6 +1847,60 @@ local WindowControlsLayout =
 	)
 
 ----------------------------------------------------------------
+-- SAVE SETTINGS BUTTON
+----------------------------------------------------------------
+
+SaveButton =
+	Create(
+		"TextButton",
+		{
+			Name = "SaveSettingsButton",
+			Parent = WindowControls,
+			LayoutOrder = 1,
+			Size = UDim2.fromOffset(34, 34),
+			BackgroundColor3 = Color3.fromRGB(20, 20, 20),
+			BorderSizePixel = 0,
+			Text = "",
+			AutoButtonColor = false,
+			Active = false,
+			Selectable = false,
+			ZIndex = 23,
+		}
+	)
+
+Corner(SaveButton, 10)
+Stroke(SaveButton, CONFIG.Colors.Border, 0.25, 1)
+
+local SaveScale =
+	Create(
+		"UIScale",
+		{
+			Parent = SaveButton,
+			Scale = 1,
+		}
+	)
+
+local SaveButtonIcon =
+	Create(
+		"TextLabel",
+		{
+			Name = "Icon",
+			Parent = SaveButton,
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.fromScale(0.5, 0.5),
+			Size = UDim2.fromScale(1, 1),
+			BackgroundTransparency = 1,
+			Text = Icon("floppy-disk"),
+			TextColor3 = Color3.fromRGB(255, 255, 255),
+			TextSize = 17,
+			Font = Enum.Font.GothamBold,
+			TextXAlignment = Enum.TextXAlignment.Center,
+			TextYAlignment = Enum.TextYAlignment.Center,
+			ZIndex = 24,
+		}
+	)
+
+----------------------------------------------------------------
 -- CLOSE BUTTON
 ----------------------------------------------------------------
 
@@ -1668,7 +1912,7 @@ local CloseButton =
 
 			Parent = WindowControls,
 
-			LayoutOrder = 3,
+			LayoutOrder = 4,
 
 			Size =
 			UDim2.fromOffset(
@@ -1734,7 +1978,7 @@ local FullscreenButton =
 
 			Parent = WindowControls,
 
-			LayoutOrder = 1,
+			LayoutOrder = 2,
 
 			Size =
 			UDim2.fromOffset(
@@ -1788,7 +2032,7 @@ local ThemeButton =
 		{
 			Name = "ThemeButton",
 			Parent = WindowControls,
-			LayoutOrder = 2,
+			LayoutOrder = 3,
 			Size = UDim2.fromOffset(34, 34),
 			BackgroundColor3 = CONFIG.Colors.Dark,
 			BackgroundTransparency = 0,
@@ -2022,6 +2266,7 @@ local function SetTheme(themeName, persist)
 		themeName = "Dark"
 	end
 
+	local themeChanged = CurrentTheme ~= themeName
 	ApplyTheme(themeName)
 
 	if ThemeIcon then
@@ -2030,7 +2275,163 @@ local function SetTheme(themeName, persist)
 
 	if persist then
 		Player:SetAttribute("SettingsTheme", CurrentTheme)
+		if themeChanged then
+			MarkSettingsDirty()
+		end
 	end
+
+	if UpdateSaveButtonVisual then
+		UpdateSaveButtonVisual()
+	end
+end
+
+local function GetSettingsSnapshot()
+	return {
+		Theme = CurrentTheme,
+		NotificationsEnabled = NotificationsEnabled,
+		ReducedMotionEnabled = ReducedMotionEnabled,
+		PhotosensitivityProtectionEnabled = PhotosensitivityProtectionEnabled,
+		VibrationEnabled = VibrationEnabled,
+		InterfaceAnimationsEnabled = InterfaceAnimationsEnabled,
+		MusicEnabled = MusicEnabled,
+		MusicVolume = MusicVolume,
+		InterfaceSoundsEnabled = InterfaceSoundsEnabled,
+	}
+end
+
+local SaveButtonPulseToken = 0
+local SaveButtonPulseActive = false
+
+local function StopSaveButtonPulse()
+	SaveButtonPulseActive = false
+	SaveButtonPulseToken += 1
+
+	if SaveButtonIcon and SaveButtonIcon.Parent then
+		SaveButtonIcon.TextTransparency = 0
+		SaveButtonIcon.TextStrokeTransparency = 0.2
+	end
+end
+
+local function StartSaveButtonPulse()
+	if not SaveButtonIcon or not SaveButtonIcon.Parent then
+		return
+	end
+
+	SaveButtonPulseActive = false
+	SaveButtonPulseToken += 1
+	local pulseToken = SaveButtonPulseToken
+	SaveButtonPulseActive = true
+
+	task.spawn(function()
+		if not SaveButtonIcon or not SaveButtonIcon.Parent then
+			return
+		end
+
+		while SaveButtonPulseActive and SaveButtonPulseToken == pulseToken and (SaveCooldownActive or SaveInProgress) do
+			for _, transparency in ipairs({0, 0.22, 0.5, 0.78, 0.5, 0.22, 0}) do
+				if not SaveButtonPulseActive or SaveButtonPulseToken ~= pulseToken then
+					break
+				end
+
+				SaveButtonIcon.TextTransparency = transparency
+				SaveButtonIcon.TextStrokeTransparency = math.clamp(transparency + 0.2, 0, 1)
+				task.wait(0.45)
+			end
+		end
+
+		if SaveButtonPulseToken == pulseToken then
+			SaveButtonPulseActive = false
+			if SaveButtonIcon and SaveButtonIcon.Parent then
+				SaveButtonIcon.TextTransparency = 0
+				SaveButtonIcon.TextStrokeTransparency = 0.2
+			end
+		end
+	end)
+end
+
+UpdateSaveButtonVisual = function()
+	if not SaveButton or not SaveButton.Parent then
+		return
+	end
+
+	local isWaiting = SaveCooldownActive or SaveInProgress
+	local baseBackground = CurrentTheme == "Dark" and CONFIG.Colors.Black or CONFIG.Colors.Dark
+	local readyTint = Color3.fromRGB(107, 228, 137)
+	local waitingTint = Color3.fromRGB(234, 76, 76)
+	local neutralTint = CurrentTheme == "Dark" and Color3.fromRGB(255, 255, 255) or CONFIG.Colors.White
+
+	local iconTint
+	local buttonBackground
+	local iconTransparency = 0
+
+	if isWaiting then
+		buttonBackground = baseBackground
+		iconTint = waitingTint
+		StartSaveButtonPulse()
+	elseif not SettingsInitialized then
+		buttonBackground = baseBackground
+		iconTint = neutralTint
+		StopSaveButtonPulse()
+	elseif SettingsDirty then
+		buttonBackground = baseBackground
+		iconTint = readyTint
+		StopSaveButtonPulse()
+	else
+		buttonBackground = baseBackground
+		iconTint = neutralTint
+		StopSaveButtonPulse()
+	end
+
+	SaveButton.BackgroundColor3 = buttonBackground
+	SaveButtonIcon.TextColor3 = iconTint
+	SaveButtonIcon.TextTransparency = iconTransparency
+	SaveButtonIcon.TextStrokeTransparency = 0.2
+	SaveButtonIcon.TextStrokeColor3 = CurrentTheme == "Dark" and Color3.fromRGB(31, 31, 31) or CONFIG.Colors.Border
+	SaveButton.Active = SettingsInitialized
+		and SettingsDirty
+		and not SaveCooldownActive
+		and not SaveInProgress
+	SaveButton.Selectable = SaveButton.Active
+end
+
+local function ApplyLoadedSettings(settings)
+	if typeof(settings) ~= "table" then
+		return false
+	end
+
+	if settings.Theme == "Light" or settings.Theme == "Dark" then
+		SetTheme(settings.Theme, false)
+		Player:SetAttribute("SettingsTheme", settings.Theme)
+	end
+
+	if typeof(settings.NotificationsEnabled) == "boolean" then
+		NotificationsEnabled = settings.NotificationsEnabled
+	end
+	if typeof(settings.ReducedMotionEnabled) == "boolean" then
+		ReducedMotionEnabled = settings.ReducedMotionEnabled
+	end
+	if typeof(settings.PhotosensitivityProtectionEnabled) == "boolean" then
+		PhotosensitivityProtectionEnabled = settings.PhotosensitivityProtectionEnabled
+	end
+	if typeof(settings.VibrationEnabled) == "boolean" then
+		VibrationEnabled = settings.VibrationEnabled
+	end
+	if typeof(settings.InterfaceAnimationsEnabled) == "boolean" then
+		InterfaceAnimationsEnabled = settings.InterfaceAnimationsEnabled
+	end
+	if typeof(settings.MusicEnabled) == "boolean" then
+		MusicEnabled = settings.MusicEnabled
+	end
+	if typeof(settings.MusicVolume) == "number" then
+		MusicVolume = math.clamp(settings.MusicVolume, 0, 1)
+	end
+	if typeof(settings.InterfaceSoundsEnabled) == "boolean" then
+		InterfaceSoundsEnabled = settings.InterfaceSoundsEnabled
+	end
+
+	ApplyMusicState()
+	SetOverlayGradientTheme(CurrentTheme, 0)
+	return true
 end
 
 ----------------------------------------------------------------
@@ -2426,7 +2827,7 @@ local PageScroll =
 			),
 
 			AutomaticCanvasSize =
-			Enum.AutomaticSize.Y,
+			Enum.AutomaticSize.None,
 
 			ScrollingDirection =
 			Enum.ScrollingDirection.Y,
@@ -2646,17 +3047,12 @@ end
 
 
 local function CreateCategoryButton(
-	category,
-	index
+category,
+index
 )
 
-	local categoryButtonHeight =
-		44
-
-	if CurrentDevice == "Mobile" then
-		categoryButtonHeight =
-			54
-	end
+local categoryButtonHeight =
+	44
 
 	local button =
 		Create(
@@ -2986,7 +3382,7 @@ end
 
 local function GetRowHeight()
 
-	if CurrentDevice == "Mobile" then
+if CurrentDevice == "Tablet" then
 		return 74
 	end
 
@@ -3334,6 +3730,8 @@ local function CreateToggle(
 			if onChanged then
 				onChanged(enabled)
 			end
+
+			MarkSettingsDirty()
 
 		end
 
@@ -3766,8 +4164,7 @@ local function CreateMusicVolumeSlider(
 	layoutOrder
 )
 
-	local rowHeight =
-		CurrentDevice == "Mobile" and 86 or 78
+	local rowHeight = 78
 
 	local row =
 		Create(
@@ -3901,6 +4298,7 @@ local function CreateMusicVolumeSlider(
 			return
 		end
 
+		local previousVolume = MusicVolume
 		MusicVolume = math.clamp(
 			(x - bar.AbsolutePosition.X) / bar.AbsoluteSize.X,
 			0,
@@ -3910,6 +4308,9 @@ local function CreateMusicVolumeSlider(
 		UpdateVisual(false)
 		BackgroundMusic.Volume = MusicVolume
 		ApplyMusicState()
+		if MusicVolume ~= previousVolume then
+			MarkSettingsDirty()
+		end
 	end
 
 	local dragging = false
@@ -3952,15 +4353,23 @@ local function CreateMusicVolumeSlider(
 		if input.KeyCode == Enum.KeyCode.Left
 			or input.KeyCode == Enum.KeyCode.DPadLeft
 		then
+			local previousVolume = MusicVolume
 			MusicVolume = math.clamp(MusicVolume - 0.05, 0, 1)
 			UpdateVisual(false)
 			ApplyMusicState()
+			if MusicVolume ~= previousVolume then
+				MarkSettingsDirty()
+			end
 		elseif input.KeyCode == Enum.KeyCode.Right
 			or input.KeyCode == Enum.KeyCode.DPadRight
 		then
+			local previousVolume = MusicVolume
 			MusicVolume = math.clamp(MusicVolume + 0.05, 0, 1)
 			UpdateVisual(false)
 			ApplyMusicState()
+			if MusicVolume ~= previousVolume then
+				MarkSettingsDirty()
+			end
 		end
 	end)
 
@@ -4000,56 +4409,36 @@ end
 ----------------------------------------------------------------
 
 local function CreateAboutCard(
-	title,
-	subtitle,
+	label,
+	value,
 	description,
-	layoutOrder,
 	position,
 	size,
-	compact,
 	iconName,
 	accentColor
 )
-	-- Cor de destaque individual do card (ícone + borda).
-	-- Se nenhuma cor for passada, cai no cinza padrão da UI.
-	accentColor =
-		accentColor or CONFIG.Colors.Secondary
+	accentColor = accentColor or CONFIG.Colors.Secondary
+	local device = DetectDevice()
+	local compact = device == "Mobile" or device == "Tablet"
+	local labelSize = compact and 13 or 16
+	local valueSize = compact and 18 or 26
+	local descriptionSize = compact and 11 or 12
 
 	local card =
 		Create(
 			"Frame",
 			{
-				Name = "AboutCard_" .. title,
-
+				Name = "AboutCard_" .. label,
 				Parent = PageScroll,
-
 				Position = position,
-
 				Size = size,
-
-				BackgroundColor3 =
-				CONFIG.Colors.Dark,
-
+				BackgroundColor3 = CONFIG.Colors.Dark,
 				BorderSizePixel = 0,
-
-				LayoutOrder =
-				layoutOrder or 1,
-
 				ZIndex = 24,
 			}
 		)
 
-	Corner(
-		card,
-		14
-	)
-
-	Stroke(
-		card,
-		accentColor,
-		0.55,
-		1
-	)
+	Corner(card, 18)
 
 	local cardGradient =
 		Create(
@@ -4064,66 +4453,77 @@ local function CreateAboutCard(
 				Rotation = 90,
 			}
 		)
-
 	cardGradient.Enabled = true
 
-	local iconShadow =
+	local accentStroke =
+		Create(
+			"UIStroke",
+			{
+				Parent = card,
+				Color = accentColor,
+				Transparency = 0.82,
+				Thickness = 1.25,
+				ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+			}
+		)
+
+	local shine =
 		Create(
 			"Frame",
 			{
 				Parent = card,
-				Position =
-				UDim2.fromOffset(
-					14,
-					14
-				),
-				Size =
-				UDim2.fromOffset(
-					26,
-					26
-				),
-				BackgroundColor3 =
-				CONFIG.Colors.Black,
+				Position = UDim2.new(0, 0, 0, 0),
+				Size = UDim2.new(1, 0, 1, 0),
+				BackgroundColor3 = CONFIG.Colors.White,
+				BackgroundTransparency = 0.96,
 				BorderSizePixel = 0,
 				ZIndex = 25,
 			}
 		)
 
-	Corner(
-		iconShadow,
-		8
-	)
+	local iconWrap =
+		Create(
+			"Frame",
+			{
+				Parent = card,
+				Position = UDim2.fromOffset(18, 18),
+				Size = UDim2.fromOffset(54, 54),
+				BackgroundColor3 = accentColor,
+				BorderSizePixel = 0,
+				ZIndex = 26,
+			}
+		)
+	Corner(iconWrap, 16)
 
-	local iconGradient =
+	local iconGlow =
 		Create(
 			"UIGradient",
 			{
-				Parent = iconShadow,
+				Parent = iconWrap,
 				Color =
 				ColorSequence.new({
 					ColorSequenceKeypoint.new(0, accentColor),
-					ColorSequenceKeypoint.new(1, CONFIG.Colors.Focus),
+					ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 255, 255)),
 				}),
 				Rotation = 45,
 			}
 		)
-
-	iconGradient.Enabled = true
+	iconGlow.Enabled = true
 
 	Create(
 		"TextLabel",
 		{
-			Parent = iconShadow,
+			Parent = iconWrap,
 			BackgroundTransparency = 1,
-			Position = UDim2.fromScale(0,0),
-			Size = UDim2.fromScale(1,1),
+			Position = UDim2.fromScale(0, 0),
+			Size = UDim2.fromScale(1, 1),
 			Text = Icon(iconName or "square-dual-arrows-to-corner"),
 			TextColor3 = CONFIG.Colors.White,
-			TextSize = compact and 13 or 14,
+			TextSize = 22,
 			Font = Enum.Font.GothamBold,
 			TextXAlignment = Enum.TextXAlignment.Center,
 			TextYAlignment = Enum.TextYAlignment.Center,
-			ZIndex = 26,
+			ZIndex = 27,
 		}
 	)
 
@@ -4131,139 +4531,89 @@ local function CreateAboutCard(
 		"TextLabel",
 		{
 			Parent = card,
-
-			Position =
-				UDim2.fromOffset(
-					50,
-					12
-				),
-
-			Size =
-				UDim2.new(
-					1,
-					-62,
-					0,
-					22
-				),
-
+			Position = UDim2.fromOffset(84, 22),
+			Size = UDim2.new(1, -96, 0, 22),
 			BackgroundTransparency = 1,
-
-			Text = title,
-
-			TextColor3 =
-				CONFIG.Colors.White,
-
-			TextSize = compact and 13 or 15,
-
-			Font =
-				Enum.Font.GothamBold,
-
-			TextXAlignment =
-				Enum.TextXAlignment.Left,
-
-			ZIndex = 25,
-		}
-	)
-
-	Create(
-		"TextLabel",
-		{
-			Parent = card,
-
-			Position =
-				UDim2.fromOffset(
-					50,
-					34
-				),
-
-			Size =
-				UDim2.new(
-					1,
-					-62,
-					0,
-					17
-				),
-
-			BackgroundTransparency = 1,
-
-			Text = subtitle,
-
-			TextColor3 =
-				CONFIG.Colors.Secondary,
-
-			TextSize = compact and 9 or 11,
-
-			Font =
-				Enum.Font.Gotham,
-
-			TextXAlignment =
-				Enum.TextXAlignment.Left,
-
-			ZIndex = 25,
-		}
-	)
-
-	local descHeight =
-		math.max(
-			32,
-			math.min(
-				math.max(0, size.Y.Offset - 72),
-				120
-			)
-		)
-
-	Create(
-		"TextLabel",
-		{
-			Parent = card,
-
-			Position =
-				UDim2.fromOffset(
-					16,
-					58
-				),
-
-			Size =
-				UDim2.new(
-					1,
-					-32,
-					0,
-					descHeight
-				),
-
-			BackgroundTransparency = 1,
-
-			Text = description,
-
-			TextColor3 =
-				CONFIG.Colors.Description,
-
-			TextSize = compact and 9 or 11,
-
-			Font =
-				Enum.Font.Gotham,
-
+			Text = label,
+			TextColor3 = CONFIG.Colors.White,
+			TextSize = labelSize,
+			Font = Enum.Font.Gotham,
 			TextWrapped = true,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextYAlignment = Enum.TextYAlignment.Center,
+			ZIndex = 25,
+		}
+	)
 
-			TextXAlignment =
-				Enum.TextXAlignment.Left,
+	Create(
+		"TextLabel",
+		{
+			Parent = card,
+			Position = UDim2.fromOffset(84, 45),
+			Size = UDim2.new(1, -96, 0, compact and 34 or 36),
+			BackgroundTransparency = 1,
+			Text = value,
+			TextColor3 = CONFIG.Colors.White,
+			TextSize = valueSize,
+			Font = Enum.Font.GothamBold,
+			TextWrapped = true,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextYAlignment = Enum.TextYAlignment.Center,
+			ZIndex = 25,
+		}
+	)
 
-			TextYAlignment =
-				Enum.TextYAlignment.Top,
-
+	Create(
+		"TextLabel",
+		{
+			Parent = card,
+			Position = UDim2.fromOffset(18, 96),
+			Size = UDim2.new(1, -36, 0, compact and 48 or 44),
+			BackgroundTransparency = 1,
+			Text = description,
+			TextColor3 = CONFIG.Colors.Description,
+			TextSize = descriptionSize,
+			Font = Enum.Font.Gotham,
+			TextWrapped = true,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextYAlignment = Enum.TextYAlignment.Top,
 			ZIndex = 25,
 		}
 	)
 
 	RegisterFadeTree(card)
-
 	return card
-
 end
 
 ----------------------------------------------------------------
 -- CLEAR PAGE
 ----------------------------------------------------------------
+
+local function UpdatePageScrollCanvasSize(extraPadding)
+	if not PageScroll then
+		return
+	end
+
+	local padding = extraPadding or 32
+	local maxBottom = 0
+
+	for _, child in ipairs(PageScroll:GetChildren()) do
+		if child:IsA("GuiObject") then
+			local absY = child.AbsolutePosition.Y - PageScroll.AbsolutePosition.Y
+			local bottom = absY + child.AbsoluteSize.Y
+			if bottom > maxBottom then
+				maxBottom = bottom
+			end
+		end
+	end
+
+	PageScroll.CanvasSize = UDim2.new(
+		0,
+		0,
+		0,
+		math.max(maxBottom + padding, PageScroll.AbsoluteSize.Y)
+	)
+end
 
 local function ClearPage()
 
@@ -4286,6 +4636,8 @@ local function ClearPage()
 	table.clear(
 		SettingRows
 	)
+
+	PageScroll.CanvasSize = UDim2.fromOffset(0, 0)
 
 end
 
@@ -4310,8 +4662,11 @@ local function BuildGeneral()
 	CreateToggle(
 		"Notificações",
 		"Exibe notificações importantes da experiência.",
-		true,
-		1
+		NotificationsEnabled,
+		1,
+		function(value)
+			NotificationsEnabled = value == true
+		end
 	)
 
 end
@@ -4369,8 +4724,11 @@ local function BuildControls()
 	CreateToggle(
 		"Vibração",
 		"Permite feedback de vibração em dispositivos compatíveis.",
-		true,
-		2
+		VibrationEnabled,
+		2,
+		function(value)
+			VibrationEnabled = value == true
+		end
 	)
 
 end
@@ -4381,13 +4739,16 @@ local function BuildInterface()
 	CreateToggle(
 		"Animações da interface",
 		"Ativa as animações e transições da interface.",
-		true,
-		1
+		InterfaceAnimationsEnabled,
+		1,
+		function(value)
+			InterfaceAnimationsEnabled = value == true
+		end
 	)
 
 	CreateToggle(
 		"Modo reduzido",
-		"Reduz movimento, escala e duração das animações.",
+		"Reduz movimento, escala e duração das animações / Reduz efeitos visuais da interface. \nObs : Tá meio bugado",
 		ReducedMotionEnabled,
 		2,
 
@@ -4419,6 +4780,14 @@ local function BuildAudio()
 
 		function(value)
 			MusicEnabled = value == true
+			if MusicEnabled then
+				if SecretSettingsTriggered then
+					SecretSettingsTriggered = false
+					CancelSecretSettingsTimer()
+					RestoreSecretSettingsEnvironment()
+					StopSecretSettingsMusic(2)
+				end
+			end
 			ApplyMusicState()
 		end
 	)
@@ -5054,24 +5423,6 @@ local function BuildEmoteConverter()
 		SetStatus(status, "Pronto. O Remote será localizado ao converter.")
 	end
 
-	if CurrentDevice == "Mobile" then
-		card.Size = UDim2.new(1, -14, 0, 540)
-		convertButton.Size = UDim2.new(1, -32, 0, 46)
-		input.Size = UDim2.new(1, -32, 0, 46)
-		copyButton.Position = UDim2.fromOffset(16, 250)
-		copyButton.Size = UDim2.new(1, -32, 0, 34)
-		playButton.Position = UDim2.fromOffset(16, 292)
-		playButton.Size = UDim2.new(1, -32, 0, 34)
-		stopButton.Position = UDim2.fromOffset(16, 334)
-		stopButton.Size = UDim2.new(1, -32, 0, 34)
-		loopButton.Position = UDim2.fromOffset(16, 376)
-		loopButton.Size = UDim2.new(1, -32, 0, 34)
-		countdownInput.Position = UDim2.fromOffset(16, 418)
-		countdownInput.Size = UDim2.new(1, -32, 0, 34)
-		countdownPlayButton.Position = UDim2.fromOffset(16, 460)
-		countdownPlayButton.Size = UDim2.new(1, -32, 0, 34)
-		status.Position = UDim2.fromOffset(16, 502)
-	end
 
 	table.insert(
 		SettingRows,
@@ -5086,309 +5437,126 @@ local function BuildEmoteConverter()
 end
 
 local function BuildAbout()
+	if not PageScroll or not MainPanel then
+		return
+	end
 
 	local device = DetectDevice()
 	local compact = device == "Mobile"
-	local gridDevice =
-		device == "PC"
-		or device == "PC_Large"
-		or device == "Tablet"
-		or device == "Console"
-		or device == "TV"
-	local columns = gridDevice and 2 or 1
-	local pageWidth = PageScroll.AbsoluteSize.X
+	local scale = math.max(MainScale and MainScale.Scale or 1, 0.01)
+	local pageWidth = PageScroll.AbsoluteSize.X / scale
 	if pageWidth <= 0 then
-		pageWidth = 560
+		pageWidth = math.max(MainPanel.AbsoluteSize.X / scale - 220, 280)
 	end
-	local horizontalGap = 8
-	local verticalGap = 8
-	local headerHeight = 52
-	local cardTop = headerHeight + 12
-	local cardWidth =
-		gridDevice and
-		math.floor((pageWidth - horizontalGap) / columns)
-		or
-		pageWidth - 6
+	pageWidth = math.max(pageWidth, 280)
 
-	local header =
-		Create(
-			"Frame",
-			{
-				Name = "AboutMiniHeader",
-				Parent = PageScroll,
-				Position =
-				UDim2.fromOffset(
-					0,
-					0
-				),
-				Size =
-				UDim2.new(
-					1,
-					-6,
-					0,
-					headerHeight
-				),
-				BackgroundColor3 =
-				CONFIG.Colors.Dark,
-				BorderSizePixel = 0,
-				ZIndex = 24,
-			}
+	local sidePadding = compact and 12 or 24
+	local horizontalGap = compact and 12 or 18
+	local verticalGap = compact and 12 or 18
+	local contentTopPadding = compact and 12 or 16
+	local cardHeight = compact and 182 or 190
+	local minCardWidth = compact and 180 or 220
+	local columns = 1
+
+	if device == "Mobile" then
+		columns = pageWidth >= 560 and 2 or 1
+	elseif device == "Tablet" then
+		columns = pageWidth >= 760 and 2 or 1
+	elseif device == "Console" or device == "TV" then
+		columns = pageWidth >= 1200 and 3 or 2
+	else
+		columns = math.clamp(
+			math.floor((pageWidth - sidePadding * 2 + horizontalGap) / (minCardWidth + horizontalGap)),
+			1,
+			3
 		)
+	end
 
-	Corner(
-		header,
-		14
-	)
+	columns = math.clamp(columns, 1, 3)
+	local cardWidth = math.floor((pageWidth - sidePadding * 2 - horizontalGap * (columns - 1)) / columns)
+	PageLayout.Parent = nil
 
-	Stroke(
-		header,
-		CONFIG.Colors.Border,
-		0.25,
-		1
-	)
-
-	local headerGradient =
-		Create(
-			"UIGradient",
-			{
-				Parent = header,
-				Color =
-				ColorSequence.new({
-					ColorSequenceKeypoint.new(0, CONFIG.Colors.Dark),
-					ColorSequenceKeypoint.new(1, CONFIG.Colors.Black),
-				}),
-				Rotation = 90,
-			}
-		)
-
-	headerGradient.Enabled = true
-
-	local icon =
-		Create(
-			"Frame",
-			{
-				Parent = header,
-				Position =
-				UDim2.fromOffset(
-					14,
-					11
-				),
-				Size =
-				UDim2.fromOffset(
-					30,
-					30
-				),
-				BackgroundColor3 =
-				CONFIG.Colors.Description,
-				BorderSizePixel = 0,
-				ZIndex = 25,
-			}
-		)
-
-	Corner(
-		icon,
-		8
-	)
-
-	local iconGradient =
-		Create(
-			"UIGradient",
-			{
-				Parent = icon,
-				Color =
-				ColorSequence.new({
-					ColorSequenceKeypoint.new(0, CONFIG.Colors.Focus),
-					ColorSequenceKeypoint.new(1, CONFIG.Colors.Secondary),
-				}),
-				Rotation = 45,
-			}
-		)
-
-	iconGradient.Enabled = true
-
-	Create(
-		"TextLabel",
-		{
-			Parent = icon,
-			BackgroundTransparency = 1,
-			Position = UDim2.fromScale(0,0),
-			Size = UDim2.fromScale(1,1),
-			Text = Icon("picture-in-picture"),
-			TextColor3 = CONFIG.Colors.White,
-			TextSize = 15,
-			Font = Enum.Font.GothamBold,
-			TextXAlignment = Enum.TextXAlignment.Center,
-			TextYAlignment = Enum.TextYAlignment.Center,
-			ZIndex = 26,
-		}
-	)
-
-	Create(
-		"TextLabel",
-		{
-			Parent = header,
-			Position =
-				UDim2.fromOffset(
-					58,
-					12
-				),
-			Size =
-				UDim2.new(
-					1,
-					-66,
-					0,
-					16
-				),
-			BackgroundTransparency = 1,
-			Text = "Sobre esta interface",
-			TextColor3 = CONFIG.Colors.White,
-			TextSize = compact and 14 or 16,
-			Font = Enum.Font.GothamBold,
-			TextXAlignment = Enum.TextXAlignment.Left,
-			ZIndex = 25,
-		}
-	)
-
-	Create(
-		"TextLabel",
-		{
-			Parent = header,
-			Position =
-				UDim2.fromOffset(
-					58,
-					30
-				),
-			Size =
-				UDim2.new(
-					1,
-					-66,
-					0,
-					14
-				),
-			BackgroundTransparency = 1,
-			Text = "Settings UI • Build 2026",
-			TextColor3 = CONFIG.Colors.Description,
-			TextSize = compact and 9 or 11,
-			Font = Enum.Font.Gotham,
-			TextXAlignment = Enum.TextXAlignment.Left,
-			ZIndex = 25,
-		}
-	)
-
-	-- O cabeçalho "Sobre esta interface" também participa do sistema
-	-- de fade, garantindo que desapareça junto com os cards ao fechar.
-	RegisterFadeTree(
-		header
-	)
-
-	-- Cada card de "Sobre" agora tem seu próprio ícone (BuilderIcons)
-	-- e sua própria cor de destaque. Troque o nome do ícone por
-	-- qualquer outro disponível no pacote BuilderIcons do Studio,
-	-- e a cor por qualquer Color3.
 	local cardData = {
-		{
-			"Interface",
-			"Settings UI",
-			"Painel visual responsivo com fluxo principal, páginas de aviso, termos e opções de acessibilidade.",
-			"windows-app-restore",
-			Color3.fromRGB(90, 150, 255),
-		},
-		{
-			"Versão",
-			"0.3 Privada",
-			"Build interno em uso para revisão da experiência, fluxo de telas e layout responsivo.",
-			"tag",
-			CONFIG.Colors.Warning,
-		},
-		{
-			"Engine",
-			"Roblox",
-			"Base executiva e runtime da experiência, com serviços e objetos do Roblox Studio.",
-			"studio",
-			Color3.fromRGB(255, 99, 99),
-		},
-		{
-			"Linguagem",
-			"Luau",
-			"Controle do painel, criação de elementos visuais, transições e eventos de interação.",
-			"luau",
-			Color3.fromRGB(154, 133, 255),
-		},
-		{
-			"Framework",
-			"Roblox Engine",
-			"Arquitetura de UI, telas, categorias e componentes de comportamento visual.",
-			"layout-grid",
-			Color3.fromRGB(70, 200, 160),
-		},
-		{
-			"Build",
-			"12 Setembro 2026",
-			"Registro de compilação e rastreio de revisão da interface para compatibilidade.",
-			"calendar",
-			Color3.fromRGB(150, 170, 190),
-		},
+		{ "Versão do jogo", "2026.1.0", "Identificação da versão atual da experiência.", "clock-spin-reverse-dashed", Color3.fromRGB(83, 148, 255) },
+		{ "Sobre a experiência", "Mansão da Barra", "Uma experiência social de convivência, interpretação e exploração.", "circle-i", Color3.fromRGB(183, 112, 255) },
+		{ "Desempenho", "Experiência otimizada", "Recursos e interface projetados para uma navegação fluida.", "lightning-bolt", Color3.fromRGB(91, 255, 176) },
+		{ "Personalização", "Sua experiência, suas escolhas", "Preferências visuais e opções de interface disponíveis no jogo.", "two-rulers-cursor", Color3.fromRGB(232, 118, 255) },
+		{ "Comunidade", "Respeito faz parte do jogo", "Informações sobre convivência, respeito entre jogadores e comportamento esperado.", "three-people", Color3.fromRGB(91, 140, 255) },
 	}
 
-	local cardRow = 0
-	local cardCol = 0
-	local maxCardHeight = 0
-	local rows = 0
-
+	local rowsNeeded = math.ceil(#cardData / columns)
 	for index, data in ipairs(cardData) do
-		local title, subtitle, description, iconName, accentColor =
-			data[1], data[2], data[3], data[4], data[5]
-		local estimateLines = math.max(1, math.ceil(string.len(description) / (compact and 44 or 60)))
-		local baseHeight = compact and 78 or 104
-		local cardHeight = baseHeight + math.max(0, estimateLines - 2) * (compact and 8 or 12)
-		local cardSize =
-			gridDevice and
-			UDim2.fromOffset(
-				cardWidth,
-				cardHeight
-			)
-			or
-			UDim2.new(
-				1,
-				-6,
-				0,
-				cardHeight
-			)
-		local x =
-			gridDevice and
-			(cardCol * (cardWidth + horizontalGap))
-			or
-			0
-		local y =
-			cardTop + (cardRow * (cardHeight + verticalGap))
+		local label, value, description, iconName, accentColor = data[1], data[2], data[3], data[4], data[5]
+		local column = (index - 1) % columns
+		local row = math.floor((index - 1) / columns)
+		local x = sidePadding + column * (cardWidth + horizontalGap)
+		local y = contentTopPadding + row * (cardHeight + verticalGap)
 
 		CreateAboutCard(
-			title,
-			subtitle,
+			label,
+			value,
 			description,
-			index,
 			UDim2.fromOffset(x, y),
-			cardSize,
-			compact,
+			UDim2.fromOffset(cardWidth, cardHeight),
 			iconName,
 			accentColor
 		)
-
-		maxCardHeight = math.max(maxCardHeight, cardHeight)
-		cardCol = cardCol + 1
-		if cardCol >= columns then
-			cardCol = 0
-			cardRow = cardRow + 1
-		end
 	end
 
-	PageScroll.CanvasSize =
-		UDim2.new(
-			0,
-			0,
-			0,
-			cardTop + (cardRow + 1) * maxCardHeight + 40
+	local footer =
+		Create(
+			"Frame",
+			{
+				Parent = PageScroll,
+				Position = UDim2.fromOffset(0, contentTopPadding + rowsNeeded * (cardHeight + verticalGap) + 8),
+				Size = UDim2.new(1, -20, 0, 48),
+				BackgroundTransparency = 1,
+				BorderSizePixel = 0,
+				ZIndex = 22,
+			}
 		)
+
+	local footerWidth = math.max(pageWidth - 20, 0)
+	local showFooterTagline = footerWidth >= 520
+
+	Create(
+		"TextLabel",
+		{
+			Parent = footer,
+			Position = UDim2.fromOffset(10, 10),
+			Size = UDim2.new(0, 180, 0, 28),
+			BackgroundTransparency = 1,
+			Text = "Settings UI | Build 2026",
+			TextColor3 = CONFIG.Colors.White,
+			TextSize = 15,
+			Font = Enum.Font.Gotham,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextYAlignment = Enum.TextYAlignment.Center,
+			ZIndex = 23,
+		}
+	)
+
+	if showFooterTagline then
+		Create(
+			"TextLabel",
+			{
+				Parent = footer,
+				Position = UDim2.new(1, -300, 0, 10),
+				Size = UDim2.new(0, 290, 0, 28),
+				BackgroundTransparency = 1,
+				Text = "Inovação • Desempenho • Experiência",
+				TextColor3 = CONFIG.Colors.Description,
+				TextSize = 14,
+				Font = Enum.Font.Gotham,
+				TextXAlignment = Enum.TextXAlignment.Right,
+				TextYAlignment = Enum.TextYAlignment.Center,
+				ZIndex = 23,
+			}
+		)
+	end
+	RegisterFadeTree(footer)
+
+	UpdatePageScrollCanvasSize(32)
 
 end
 
@@ -5502,11 +5670,18 @@ function BuildCategory(
 	-- Agora que todos os elementos, constraints, tamanhos responsivos
 	-- e registros de fade já existem, podemos exibir a página.
 	PageScroll.Visible = pageWasVisible
+	UpdatePageScrollCanvasSize(32)
 
 	if not animate then
-
+		if CurrentCategory == "Sobre" and FullscreenEnabled then
+			if type(ApplyResponsiveUIScale) == "function" then
+				local currentScale = ApplyResponsiveUIScale(DetectDevice())
+				if MainScale then
+					MainScale.Scale = currentScale
+				end
+			end
+		end
 		return
-
 	end
 
 	local token =
@@ -6193,19 +6368,6 @@ RegisterFadeTree(
 	WarningPanel
 )
 
-local WarningAspectConstraint =
-	Create(
-		"UIAspectRatioConstraint",
-		{
-			Parent = WarningPanel,
-			AspectType =
-			Enum.AspectType.ScaleWithParentSize,
-			DominantAxis =
-			Enum.DominantAxis.Width,
-			AspectRatio = 0.97,
-		}
-	)
-
 ----------------------------------------------------------------
 -- TERMS PANEL
 ----------------------------------------------------------------
@@ -6497,19 +6659,6 @@ RegisterFadeTree(
 	TermsPanel
 )
 
-local TermsAspectConstraint =
-	Create(
-		"UIAspectRatioConstraint",
-		{
-			Parent = TermsPanel,
-			AspectType =
-			Enum.AspectType.ScaleWithParentSize,
-			DominantAxis =
-			Enum.DominantAxis.Width,
-			AspectRatio = 0.97,
-		}
-	)
-
 ----------------------------------------------------------------
 -- RESPONSIVE
 ----------------------------------------------------------------
@@ -6531,10 +6680,7 @@ local function GetPanelSize(
 
 	if fullscreen then
 
-		if device == "Mobile" then
-			return CONFIG.Fullscreen.Mobile
-
-		elseif device == "Tablet" then
+		if device == "Tablet" then
 			return CONFIG.Fullscreen.Tablet
 
 		elseif device == "Console" then
@@ -6552,14 +6698,7 @@ local function GetPanelSize(
 
 	end
 
-	if device == "Mobile" then
-
-		return UDim2.fromScale(
-			0.96,
-			0.86
-		)
-
-	elseif device == "Tablet" then
+	if device == "Tablet" then
 
 		return UDim2.fromScale(
 			0.86,
@@ -6597,55 +6736,36 @@ local function GetPanelSize(
 end
 
 
-local function ApplyAspectProfile(device)
-
-	local profiles = {
-		Mobile = {
-			AspectType = Enum.AspectType.ScaleWithParentSize,
-			DominantAxis = Enum.DominantAxis.Width,
-			AspectRatio = 0.97,
-		},
-		Tablet = {
-			AspectType = Enum.AspectType.ScaleWithParentSize,
-			DominantAxis = Enum.DominantAxis.Width,
-			AspectRatio = 0.97,
-		},
-		Console = {
-			AspectType = Enum.AspectType.ScaleWithParentSize,
-			DominantAxis = Enum.DominantAxis.Height,
-			AspectRatio = 1.80,
-		},
-		TV = {
-			AspectType = Enum.AspectType.ScaleWithParentSize,
-			DominantAxis = Enum.DominantAxis.Width,
-			AspectRatio = 1.60,
-		},
-		PC_Large = {
-			AspectType = Enum.AspectType.ScaleWithParentSize,
-			DominantAxis = Enum.DominantAxis.Width,
-			AspectRatio = 1.70,
-		},
-		PC = {
-			AspectType = Enum.AspectType.ScaleWithParentSize,
-			DominantAxis = Enum.DominantAxis.Width,
-			AspectRatio = 1.70,
-		},
-	}
-
-	local profile = profiles[device]
-
-	if not profile then
-		profile = profiles.PC
+function GetResponsiveUIScale(device)
+	if device == "Mobile" then
+		return 0.7
+	elseif device == "Tablet" then
+		return 1.3
+	elseif device == "Console" then
+		return 2
+	elseif device == "TV" then
+		return 2
 	end
 
-	WarningAspectConstraint.AspectType = profile.AspectType
-	WarningAspectConstraint.DominantAxis = profile.DominantAxis
-	WarningAspectConstraint.AspectRatio = profile.AspectRatio
+	return 1
+end
 
-	TermsAspectConstraint.AspectType = profile.AspectType
-	TermsAspectConstraint.DominantAxis = profile.DominantAxis
-	TermsAspectConstraint.AspectRatio = profile.AspectRatio
+function ApplyResponsiveUIScale(device)
+	local scale = GetResponsiveUIScale(device)
 
+	if MainScale then
+		MainScale.Scale = scale
+	end
+
+	if WarningScale then
+		WarningScale.Scale = scale
+	end
+
+	if TermsScale then
+		TermsScale.Scale = scale
+	end
+
+	return scale
 end
 
 local function UpdateResponsiveLayout(
@@ -6658,7 +6778,8 @@ local function UpdateResponsiveLayout(
 	CurrentDevice =
 		device
 
-	ApplyAspectProfile(device)
+	UpdateHeaderAlignment()
+	ApplyResponsiveUIScale(device)
 
 	-- Fullscreen control should remain visible only on
 	-- desktop-like sessions. Mobile, tablet, console,
@@ -6666,8 +6787,10 @@ local function UpdateResponsiveLayout(
 	-- forcing a desktop-only layout affordance.
 	if IsPCDevice(device) then
 		FullscreenButton.Visible = true
+		WindowControls.Size = UDim2.fromOffset(160, 34)
 	else
 		FullscreenButton.Visible = false
+		WindowControls.Size = UDim2.fromOffset(118, 34)
 	end
 
 	local target =
@@ -6697,55 +6820,54 @@ local function UpdateResponsiveLayout(
 	----------------------------------------------------------------
 
 	if device == "Mobile" then
-
 		PageTitle.TextXAlignment =
-			Enum.TextXAlignment.Center
-		PageTitle.TextSize = 18
+			Enum.TextXAlignment.Left
+		PageTitle.TextSize = 20
 		PageTitle.Position =
 			UDim2.fromOffset(
 				0,
-				-4
+				0
 			)
 		PageTitle.Size =
 			UDim2.new(
 				1,
 				0,
 				0,
-				30
+				28
 			)
 
 		PageDescription.TextXAlignment =
-			Enum.TextXAlignment.Center
-		PageDescription.TextSize = 10
+			Enum.TextXAlignment.Left
+		PageDescription.TextSize = 11
 		PageDescription.Position =
 			UDim2.fromOffset(
 				0,
-				22
+				30
 			)
 		PageDescription.Size =
 			UDim2.new(
 				1,
 				0,
 				0,
-				22
+				28
 			)
 
 		PageScroll.Position =
 			UDim2.fromOffset(
 				0,
-				58
+				68
 			)
 		PageScroll.Size =
 			UDim2.new(
 				1,
 				0,
 				1,
-				-58
+				-68
 			)
 		PageLayout.Padding =
 			UDim.new(
 				0,
-				9
+				8
 			)
 
 	else
@@ -6788,219 +6910,53 @@ local function UpdateResponsiveLayout(
 	-- CATEGORIES SIDEBAR MOBILE COMFORT
 	----------------------------------------------------------------
 
-	if device == "Mobile" then
+	for _, data in pairs(CategoryButtons) do
 
-		local mobileCategoryButtonHeight = 54
+		if data and data.Button then
 
-		for _, data in pairs(CategoryButtons) do
-
-			if data and data.Button then
-
-				data.Button.Size =
-					UDim2.new(
-						1,
-						-4,
-						0,
-						mobileCategoryButtonHeight
-					)
-
-			end
-
-			if data and data.Icon then
-
-				data.Icon.Size =
-					UDim2.fromOffset(
-						24,
-						mobileCategoryButtonHeight
-					)
-
-			end
-
-			if data and data.Label then
-
-				data.Label.Position =
-					UDim2.fromOffset(
-						40,
-						0
-					)
-
-			end
+			data.Button.Size =
+				UDim2.new(
+					1,
+					-4,
+					0,
+					44
+				)
 
 		end
 
-		CategoryLayout.Padding =
-			UDim.new(
-				0,
-				9
-			)
+		if data and data.Icon then
 
-	else
-
-		for _, data in pairs(CategoryButtons) do
-
-			if data and data.Button then
-
-				data.Button.Size =
-					UDim2.new(
-						1,
-						-4,
-						0,
-						44
-					)
-
-			end
-
-			if data and data.Icon then
-
-				data.Icon.Size =
-					UDim2.fromOffset(
-						24,
-						44
-					)
-
-			end
-
-			if data and data.Label then
-
-				data.Label.Position =
-					UDim2.fromOffset(
-						40,
-						0
-					)
-
-			end
+			data.Icon.Size =
+				UDim2.fromOffset(
+					24,
+					44
+				)
 
 		end
 
-		CategoryLayout.Padding =
-			UDim.new(
-				0,
-				5
-			)
+		if data and data.Label then
+
+			data.Label.Position =
+				UDim2.fromOffset(
+					40,
+					0
+				)
+
+		end
 
 	end
+
+	CategoryLayout.Padding =
+		UDim.new(
+			0,
+			5
+		)
 
 	----------------------------------------------------------------
 	-- WARNING
 	----------------------------------------------------------------
 
-	if device == "Mobile" then
-
-		WarningPanel.Size =
-			UDim2.fromScale(
-				0.96,
-				0.86
-			)
-
-		WarningPanel.Position =
-			UDim2.fromScale(
-				0.5,
-				0.5
-			)
-
-		WarningTitle.TextSize = 14
-		WarningTitle.Size =
-			UDim2.new(
-				1,
-				-115,
-				0,
-				42
-			)
-
-		WarningContent.TextSize = 10
-		WarningContent.Position =
-			UDim2.fromOffset(
-				24,
-				75
-			)
-		WarningContent.Size =
-			UDim2.new(
-				1,
-				-48,
-				0,
-				82
-			)
-
-		WarningBox.Size =
-			UDim2.new(
-				1,
-				-48,
-				0,
-				50
-			)
-		WarningBox.Position =
-			UDim2.fromOffset(
-				24,
-				166
-			)
-
-		EmergencyLabel.Position =
-			UDim2.fromOffset(
-				24,
-				226
-			)
-		EmergencyLabel.TextSize = 9
-		EmergencyLabel.Size =
-			UDim2.new(
-				1,
-				-48,
-				0,
-				38
-			)
-
-		WarningMore.AnchorPoint =
-			Vector2.new(
-				0.5,
-				0
-			)
-		WarningMore.Position =
-			UDim2.new(
-				0.5,
-				0,
-				0,
-				315
-			)
-		WarningMore.Size =
-			UDim2.fromOffset(
-				80,
-				22
-			)
-		WarningMore.TextSize = 9
-		WarningMore.ZIndex = 66
-
-		WarningReduced.Position =
-			UDim2.new(
-				0,
-				24,
-				1,
-				-66
-			)
-		WarningReduced.Size =
-			UDim2.new(
-				0.5,
-				-28,
-				0,
-				30
-			)
-		WarningReduced.TextSize = 10
-
-		WarningConfirm.Position =
-			UDim2.new(
-				0.5,
-				4,
-				1,
-				-66
-			)
-		WarningConfirm.Size =
-			UDim2.new(
-				0.5,
-				-28,
-				0,
-				30
-			)
-		WarningConfirm.TextSize = 10
-
-	elseif device == "Tablet" then
+	if device == "Tablet" then
 
 		WarningPanel.Size =
 			UDim2.fromScale(
@@ -7022,14 +6978,7 @@ local function UpdateResponsiveLayout(
 	-- TEXT
 	----------------------------------------------------------------
 
-	if device == "Mobile" then
-
-		Title.TextSize = 21
-		PageTitle.TextSize = 18
-
-		CategoryTitle.TextSize = 15
-
-	elseif device == "Console"
+	if device == "Console"
 		or device == "TV"
 	then
 
@@ -7230,6 +7179,10 @@ local function SetFullscreen(
 					end
 				)
 
+				if FullscreenEnabled then
+					PageScroll.Visible = true
+				end
+
 			end
 
 			EndTransition(
@@ -7306,10 +7259,11 @@ function OpenWarning()
 			0.5
 		)
 
+	local responsiveScale = GetResponsiveUIScale(DetectDevice())
 	WarningScale.Scale =
 		ReducedMotionEnabled
-		and 1
-		or 0.94
+		and responsiveScale
+		or responsiveScale * 0.94
 
 	WarningPanel.BackgroundTransparency =
 		0
@@ -7343,7 +7297,7 @@ function OpenWarning()
 
 	PlayScale(
 		WarningScale,
-		1,
+		GetResponsiveUIScale(DetectDevice()),
 		CONFIG.Animation.Warning
 	)
 
@@ -7515,10 +7469,11 @@ local function ConfirmWarning(
 			MainPanel.BackgroundTransparency =
 				0
 
+			local responsiveScale = GetResponsiveUIScale(DetectDevice())
 			MainScale.Scale =
 				ReducedMotionEnabled
-				and 1
-				or 0.88
+				and responsiveScale
+				or responsiveScale * 0.88
 
 			BuildCategory(
 				"Geral",
@@ -7543,7 +7498,7 @@ local function ConfirmWarning(
 
 			PlayScale(
 				MainScale,
-				1,
+				GetResponsiveUIScale(DetectDevice()),
 				CONFIG.Animation.Open
 			)
 
@@ -7672,6 +7627,13 @@ local function OpenSettings()
 	end
 
 	Opened = true
+	SecretSettingsTriggered = false
+	CancelSecretSettingsTimer()
+	RestoreSecretSettingsEnvironment()
+	if SecretSettingsMusic and SecretSettingsMusic.Parent then
+		SecretSettingsMusic.Volume = 0
+		SecretSettingsMusic:Stop()
+	end
 
 	-- Restaura a última posição de navegação.
 	-- Warning/Terms continuam sendo controlados pelo fluxo de acessibilidade.
@@ -7704,10 +7666,11 @@ local function OpenSettings()
 	MainPanel.BackgroundTransparency =
 		0
 
+	local responsiveScale = GetResponsiveUIScale(DetectDevice())
 	MainScale.Scale =
 		ReducedMotionEnabled
-		and 1
-		or 0.88
+		and responsiveScale
+		or responsiveScale * 0.88
 
 	MainPanel.Visible =
 		not AccessibilityGateActive
@@ -7720,6 +7683,7 @@ local function OpenSettings()
 
 	Overlay.BackgroundTransparency =
 		1
+	OverlayFade.BackgroundTransparency = 1
 
 	SettingsBlur.Size =
 		0
@@ -7750,10 +7714,11 @@ local function OpenSettings()
 				0.5
 			)
 
+		local responsiveScale = GetResponsiveUIScale(DetectDevice())
 		WarningScale.Scale =
 			ReducedMotionEnabled
-			and 1
-			or 0.94
+			and responsiveScale
+			or responsiveScale * 0.94
 
 		FadePanel(
 			WarningPanel,
@@ -7777,7 +7742,7 @@ local function OpenSettings()
 
 		PlayScale(
 			WarningScale,
-			1,
+			GetResponsiveUIScale(DetectDevice()),
 			CONFIG.Animation.Warning
 		)
 
@@ -7812,6 +7777,7 @@ local function OpenSettings()
 	PlaySettingsSound(
 		"OpenSettings"
 	)
+	StartSecretSettingsTimer()
 
 	FadePanel(
 		MainPanel,
@@ -7835,7 +7801,7 @@ local function OpenSettings()
 
 	PlayScale(
 		MainScale,
-		1,
+		GetResponsiveUIScale(DetectDevice()),
 		CONFIG.Animation.Open
 	)
 
@@ -7885,6 +7851,12 @@ local function CloseSettings()
 	PlaySettingsSound(
 		"CloseSettings"
 	)
+	CancelSecretSettingsTimer()
+	if SecretSettingsTriggered then
+		RestoreSecretSettingsEnvironment()
+		StopSecretSettingsMusic(2)
+		SecretSettingsTriggered = false
+	end
 
 	-- Guarda a posição antes de desmontar o estado visual.
 	SavedCategory = CurrentCategory
@@ -8051,10 +8023,7 @@ local function CloseSettings()
 			MainPanel.BackgroundTransparency =
 				0
 
-			MainScale.Scale =
-				ReducedMotionEnabled
-				and 1
-				or 0.88
+			MainScale.Scale = GetResponsiveUIScale(DetectDevice())
 
 			SettingsBlur.Size =
 				0
@@ -8232,6 +8201,73 @@ InputConnection =
 ----------------------------------------------------------------
 -- TOPBAR EVENTS
 ----------------------------------------------------------------
+
+SaveButton.Activated:Connect(function()
+	if not Opened
+		or not CanInteract()
+		or not SettingsInitialized
+		or not SettingsDirty
+		or SaveCooldownActive
+		or SaveInProgress
+	then
+		return
+	end
+
+	if not SettingsPersistenceRemote then
+		warn("[SettingsUI] Serviço de salvamento ainda não está disponível.")
+		return
+	end
+
+	PlaySettingsSound("SaveButton")
+	SaveCooldownActive = true
+	SaveInProgress = true
+	local revisionAtSave = SettingsRevision
+	UpdateSaveButtonVisual()
+
+	task.delay(5, function()
+		SaveCooldownActive = false
+		UpdateSaveButtonVisual()
+	end)
+
+	task.spawn(function()
+		local success, response = pcall(function()
+			return SettingsPersistenceRemote:InvokeServer(
+				"Save",
+				GetSettingsSnapshot()
+			)
+		end)
+
+		SaveInProgress = false
+
+		if not success then
+			warn("[SettingsUI] Falha ao salvar configurações:", response)
+			UpdateSaveButtonVisual()
+			return
+		end
+
+		if typeof(response) ~= "table" or response.Success ~= true then
+			local message = typeof(response) == "table"
+				and response.Error
+				or "Resposta inválida do servidor."
+			warn("[SettingsUI] Falha ao salvar configurações:", message)
+			UpdateSaveButtonVisual()
+			return
+		end
+
+		if SettingsRevision == revisionAtSave then
+			SettingsDirty = false
+		end
+		UpdateSaveButtonVisual()
+	end)
+end)
+
+SaveButton.SelectionGained:Connect(function()
+	ApplySmartFocus(SaveScale, true)
+end)
+
+SaveButton.SelectionLost:Connect(function()
+	ApplySmartFocus(SaveScale, false)
+end)
 
 local function ToggleSettingsFromTopbar()
 
@@ -8420,10 +8456,11 @@ WarningMore.Activated:Connect(
 				0.5
 			)
 
+		local responsiveScale = GetResponsiveUIScale(DetectDevice())
 		TermsScale.Scale =
 			ReducedMotionEnabled
-			and 1
-			or 0.94
+			and responsiveScale
+			or responsiveScale * 0.94
 
 		TermsPanel.BackgroundTransparency =
 			0
@@ -8462,7 +8499,7 @@ WarningMore.Activated:Connect(
 
 		PlayScale(
 			TermsScale,
-			1,
+			GetResponsiveUIScale(DetectDevice()),
 			CONFIG.Animation.Medium
 		)
 
@@ -8871,3 +8908,56 @@ CaptureFadeTree(
 UpdateCategoryVisuals()
 
 --Testing!
+
+task.spawn(function()
+	local initialSettings = GetSettingsSnapshot()
+	local remote = ReplicatedStorage:WaitForChild(
+		"SettingsPersistenceRemote",
+		15
+	)
+
+	if not remote or not remote:IsA("RemoteFunction") then
+		warn("[SettingsUI] Serviço de preferências não encontrado ou inválido.")
+		return
+	end
+
+	SettingsPersistenceRemote = remote
+	local success, response = pcall(function()
+		return remote:InvokeServer("Load")
+	end)
+
+	if not success then
+		warn("[SettingsUI] Não foi possível carregar as configurações:", response)
+		return
+	end
+
+	if typeof(response) ~= "table"
+		or response.Success ~= true
+		or typeof(response.Settings) ~= "table"
+	then
+		local message = typeof(response) == "table"
+			and response.Error
+			or "Resposta inválida do servidor."
+		warn("[SettingsUI] Não foi possível carregar as configurações:", message)
+		return
+	end
+
+	local mergedSettings = table.clone(response.Settings)
+	local currentSettings = GetSettingsSnapshot()
+	local hasPendingChanges = false
+	for settingName, currentValue in pairs(currentSettings) do
+		if currentValue ~= initialSettings[settingName] then
+			mergedSettings[settingName] = currentValue
+			hasPendingChanges = true
+		end
+	end
+
+	ApplyLoadedSettings(mergedSettings)
+	SettingsDirty = hasPendingChanges
+	SettingsInitialized = true
+	UpdateSaveButtonVisual()
+
+	if Opened and CurrentPage == "Main" then
+		BuildCategory(CurrentCategory, false, true)
+	end
+end)
