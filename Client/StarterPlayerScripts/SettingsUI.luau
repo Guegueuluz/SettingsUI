@@ -144,8 +144,8 @@ local CONFIG = {
 		-- Exemplo: "rbxassetid://1234567890"
 		MusicId = "",
 
-		MusicEnabledDefault = true,
-		MusicVolumeDefault = 0.525,
+		MusicEnabledDefault = false,
+		MusicVolumeDefault = 0,
 	},
 
 	Accessibility = {
@@ -154,7 +154,7 @@ local CONFIG = {
 		-- Usado para testes de avisos relacionados à
 		-- sensibilidade a efeitos visuais.
 
-		WarningEnabled = true,
+		WarningEnabled = false,
 
 		-- Se true, o aviso aparece novamente sempre
 		-- que a interface for aberta.
@@ -1199,17 +1199,65 @@ local function FadePanel(
 
 end
 
-local function FadeOverlayFade(
-	visible,
-	duration
-)
+local OverlayFadeTween = nil
+
+local function FadeOverlayFade(visible, duration)
 
 	if not OverlayFade then
 		return
 	end
 
+	if OverlayFadeTween then
+		OverlayFadeTween:Cancel()
+		OverlayFadeTween = nil
+	end
+
+	duration = duration or CONFIG.Animation.Medium
+
 	OverlayFade.Visible = true
-	OverlayFade.BackgroundTransparency = visible and 0 or 1
+
+	local startTransparency = visible and 1 or 0
+	local targetTransparency = visible and 0 or 1
+
+	OverlayFade.BackgroundTransparency = startTransparency
+
+	local tween = Tween(
+		OverlayFade,
+		{
+			BackgroundTransparency = targetTransparency,
+		},
+		duration,
+		Enum.EasingStyle.Quad,
+		Enum.EasingDirection.InOut
+	)
+
+	if not tween then
+		warn("[SettingsUI] Não foi possível criar o tween do OverlayFade.")
+		return
+	end
+
+	OverlayFadeTween = tween
+
+	tween.Completed:Connect(function(playbackState)
+
+		if OverlayFadeTween ~= tween then
+			return
+		end
+
+		if playbackState ~= Enum.PlaybackState.Completed then
+			OverlayFadeTween = nil
+			return
+		end
+
+		if not visible then
+			OverlayFade.Visible = false
+		end
+
+		OverlayFadeTween = nil
+
+	end)
+
+	return tween
 
 end
 
@@ -3047,12 +3095,12 @@ end
 
 
 local function CreateCategoryButton(
-category,
-index
+	category,
+	index
 )
 
-local categoryButtonHeight =
-	44
+	local categoryButtonHeight =
+		44
 
 	local button =
 		Create(
@@ -3382,7 +3430,7 @@ end
 
 local function GetRowHeight()
 
-if CurrentDevice == "Tablet" then
+	if CurrentDevice == "Tablet" then
 		return 74
 	end
 
@@ -7683,7 +7731,7 @@ local function OpenSettings()
 
 	Overlay.BackgroundTransparency =
 		1
-	OverlayFade.BackgroundTransparency = 1
+	OverlayFade.BackgroundTransparency = 0
 
 	SettingsBlur.Size =
 		0
